@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Claude local session/config files
+.claude/
+CLAUDE.md
+
+# Keep this public tree focused on the GA workflow.
+docs/*.md
+scripts/*
+!scripts/build_ga_au_database.py
+!scripts/update_ga_event_highrate_availability.py
+!scripts/run_ga_batch_workflow.sh
+!scripts/run_ga_event_1hz_pride_workflow.sh
+!scripts/normalize_ga_pride_kin_event.py
+!scripts/compute_kin_quality.py
+tools/earthscope_downloader/
+tools/geonet_downloader/
+tools/renag_downloader/
+tools/ring_downloader/
+
+# Local pipeline data and generated products
+data/
+runs/
+exports/
+figure/
+incoming_plotting_origina/
+
+# Curated README figures are small, intentional repository assets.
+!docs/images/
+!docs/images/*.png
+
+# Logs and temporary files
+*.log
+*.tmp
+.DS_Store

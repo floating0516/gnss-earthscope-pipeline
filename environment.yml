@@ -1,0 +1,12 @@
+name: gnss-earthscope-pipeline
+channels:
+  - conda-forge
+dependencies:
+  - python>=3.10
+  - bash
+  - coreutils
+  - curl
+  - jq
+  - pip
+  - pip:
+      - -e .[web]
