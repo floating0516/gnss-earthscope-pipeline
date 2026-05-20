@@ -20,6 +20,7 @@ CLAUDE.md
 
 # Keep this public tree focused on the GA workflow.
 docs/*.md
+!docs/ga_event_catalog.md
 scripts/*
 !scripts/build_ga_au_database.py
 !scripts/update_ga_event_highrate_availability.py

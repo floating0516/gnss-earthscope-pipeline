@@ -60,6 +60,10 @@ incoming_plotting_origina/
 
 Only the curated images in `docs/images/` are tracked.
 
+## Event catalog
+
+A readable event catalog is available at [`docs/ga_event_catalog.md`](docs/ga_event_catalog.md). It lists the collected earthquake events with magnitude, coordinates, depth, place, and candidate GA station counts within 200 km and 300 km.
+
 ## Setup
 
 Python package metadata is in `pyproject.toml`; the package requires Python 3.10 or newer.
@@ -183,6 +187,10 @@ incoming_plotting_origina/
 ```
 
 只有 `docs/images/` 中用于 README 展示的精选图片会被 git 跟踪。
+
+## 地震事件目录
+
+可读的地震事件目录见 [`docs/ga_event_catalog.md`](docs/ga_event_catalog.md)。该文件列出了抓取到的地震事件，包括震级、经纬度、深度、地点，以及 200 km 和 300 km 范围内的 GA 候选台站数量。
 
 ## 环境安装
 
