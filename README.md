@@ -14,18 +14,18 @@ The full `data/`, `runs/`, `exports/`, and bulk `figure/` directories are local
 pipeline products and are ignored by git. The selected figures below are copied
 under `docs/images/` for README display only.
 
-### GA Australia station/event coverage
+### Global station/event coverage
 
-![GA Australia GNSS station/event map](docs/images/ga_australia_gnss_station_event_map.png)
+![Global GNSS station/event map](docs/images/world_map.png)
 
-### Australia example event with the most available normalized stations
+### Event with the most normalized stations
 
-Macquarie Island region, 2025-04-29 (`us7000pvtr`), tied for the current
-Australia normalized maximum in this workspace.
+Petrolia, California, 2021-12-20 (`nc73666231`) has the largest normalized
+station count in this workspace: 96 stations.
 
-![Macquarie Island station map](docs/images/macquarie-island-region-20250429-station_map.png)
+![Petrolia station map](docs/images/petrolia-20211220-california_station_map.png)
 
-![Macquarie Island waveform record section](docs/images/macquarie-island-region-20250429-record_section.png)
+![Petrolia waveform record section](docs/images/petrolia-20211220-california_record_section.png)
 
 It is intentionally separated from the older collection data in:
 
