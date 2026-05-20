@@ -9,4 +9,4 @@ dependencies:
   - jq
   - pip
   - pip:
-      - -e .[web]
+      - -e .

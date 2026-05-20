@@ -9,18 +9,8 @@ description = "1 Hz GNSS earthquake download, PRIDE PPP-AR processing, and batch
 requires-python = ">=3.10"
 dependencies = []
 
-[project.optional-dependencies]
-web = [
-  "fastapi>=0.110",
-  "uvicorn[standard]>=0.27",
-  "python-multipart>=0.0.9",
-]
-
 [project.scripts]
 gnss-eq = "gnss_eq.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
-
-[tool.setuptools.package-data]
-gnss_eq = ["static/*"]

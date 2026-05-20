@@ -31,7 +31,6 @@ gnss-earthquake-pipeline/
 ├── README.md
 ├── environment.yml
 ├── pyproject.toml
-├── requirements-web.txt
 ├── scripts/
 │   ├── build_ga_au_database.py
 │   ├── update_ga_event_highrate_availability.py
@@ -75,10 +74,8 @@ With conda:
 ```bash
 conda env create -f environment.yml
 conda activate gnss-earthscope-pipeline
-pip install -e .[web]
+pip install -e .
 ```
-
-Web-only dependencies are also listed in `requirements-web.txt`.
 
 External runtime tools are not vendored in this repository. Depending on the workflow, the local machine should provide tools such as `curl`, `jq`, `timeout`, `CRX2RNX`, and `pdp3`.
 
@@ -111,16 +108,6 @@ Compute KIN quality summaries:
 ```bash
 python scripts/compute_kin_quality.py --help
 ```
-
-## Dashboard
-
-The package includes a small FastAPI dashboard under `src/gnss_eq/web.py` with static assets in `src/gnss_eq/static/`.
-
-```bash
-gnss-eq dashboard --host 127.0.0.1 --port 8765
-```
-
-Start it with `--allow-workflow-run` only when you intentionally want the dashboard to launch local workflows.
 
 ## Tests
 
@@ -163,7 +150,6 @@ gnss-earthquake-pipeline/
 ├── README.md
 ├── environment.yml
 ├── pyproject.toml
-├── requirements-web.txt
 ├── scripts/
 │   ├── build_ga_au_database.py
 │   ├── update_ga_event_highrate_availability.py
@@ -207,10 +193,8 @@ Python 包配置在 `pyproject.toml` 中，要求 Python 3.10 或更新版本。
 ```bash
 conda env create -f environment.yml
 conda activate gnss-earthscope-pipeline
-pip install -e .[web]
+pip install -e .
 ```
-
-Web 相关依赖也单独列在 `requirements-web.txt` 中。
 
 外部运行依赖不会打包进本仓库。根据具体流程，本地机器需要安装 `curl`、`jq`、`timeout`、`CRX2RNX`、`pdp3` 等工具。
 
@@ -243,16 +227,6 @@ python scripts/normalize_ga_pride_kin_event.py --help
 ```bash
 python scripts/compute_kin_quality.py --help
 ```
-
-## Dashboard
-
-仓库包含一个简单的 FastAPI dashboard，后端在 `src/gnss_eq/web.py`，静态资源在 `src/gnss_eq/static/`。
-
-```bash
-gnss-eq dashboard --host 127.0.0.1 --port 8765
-```
-
-只有在明确希望 dashboard 启动本地工作流时，才使用 `--allow-workflow-run`。
 
 ## 测试
 

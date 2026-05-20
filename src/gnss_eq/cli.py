@@ -567,23 +567,6 @@ def cmd_check_env(_: argparse.Namespace) -> int:
     return 1 if failed else 0
 
 
-def cmd_dashboard(args: argparse.Namespace) -> int:
-    try:
-        import uvicorn
-    except ImportError:
-        print("Missing optional dependency: uvicorn. Install with `pip install -e .[web]`.", file=sys.stderr)
-        return 1
-    os.environ["GNSS_EQ_WEB_DB"] = absolute_path(args.db)
-    os.environ["GNSS_EQ_WEB_RUN_ROOT"] = absolute_path(args.run_root)
-    os.environ["GNSS_EQ_WEB_OBS_ROOT"] = absolute_path(args.obs_root)
-    os.environ["GNSS_EQ_WEB_BATCH_ROOT"] = absolute_path(args.batch_root)
-    os.environ["GNSS_EQ_WEB_SUMMARY"] = absolute_path(args.summary)
-    os.environ["GNSS_EQ_WEB_ALLOW_WORKFLOW_RUN"] = "1" if args.allow_workflow_run else "0"
-    os.environ["GNSS_EQ_WEB_BASE_URL"] = args.base_url
-    uvicorn.run("gnss_eq.web:app", host=args.host, port=args.port, reload=args.reload)
-    return 0
-
-
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="gnss-eq", description="GNSS earthquake workflow CLI.")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -699,19 +682,6 @@ def build_parser() -> argparse.ArgumentParser:
 
     check = sub.add_parser("check-env", help="Check local runtime dependencies.")
     check.set_defaults(func=cmd_check_env)
-
-    dashboard = sub.add_parser("dashboard", help="Run the local Web dashboard.")
-    dashboard.add_argument("--host", default="127.0.0.1")
-    dashboard.add_argument("--port", type=int, default=8765)
-    dashboard.add_argument("--reload", action="store_true")
-    dashboard.add_argument("--db", default=str(DEFAULT_AVAILABILITY_DB))
-    dashboard.add_argument("--run-root", default=str(ROOT / "runs"))
-    dashboard.add_argument("--obs-root", default=str(ROOT / "data" / "obs"))
-    dashboard.add_argument("--batch-root", default=str(ROOT / "data" / "batches"))
-    dashboard.add_argument("--summary", default=str(ROOT / "batch-summary.tsv"))
-    dashboard.add_argument("--base-url", default="https://web-services.unavco.org")
-    dashboard.add_argument("--allow-workflow-run", action="store_true")
-    dashboard.set_defaults(func=cmd_dashboard)
     return parser
 
 
