@@ -18,7 +18,7 @@ env/
 .claude/
 CLAUDE.md
 
-# Keep this public tree focused on the GA workflow.
+# Keep this public tree focused on the curated generic workflow plus current data-source adapters.
 docs/*.md
 !docs/ga_event_catalog.md
 scripts/*

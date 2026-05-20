@@ -1,8 +1,8 @@
-# GA Event Catalog
+# Event Catalog
 
-This catalog summarizes the earthquake events collected in the local GA availability database.
+This catalog summarizes earthquake events collected through the current data-source adapter. The same table format can be regenerated for other regions when event catalogs, station metadata, and high-rate GNSS data access are available.
 
-中文：本文件汇总本地 GA availability 数据库中抓取到的地震事件，包含震级、经纬度、深度、地点，以及事件周围 200 km 和 300 km 范围内的候选 GNSS 台站数量。
+中文：本文件汇总当前数据源适配器抓取到的地震事件。只要其他地区具备地震事件目录、台站元数据和高频 GNSS 数据接入，也可以用同样格式生成对应目录。
 
 - Source database: `data/ga_availability/ga_1hz.sqlite`
 - Event table: `ga_m6plus_events_au` (726 events)
@@ -20,7 +20,7 @@ This catalog summarizes the earthquake events collected in the local GA availabi
 - `M`: event magnitude.
 - `Lat` / `Lon`: event coordinates in decimal degrees.
 - `Depth km`: USGS event depth.
-- `Stations ≤200 km` and `Stations ≤300 km`: candidate GA GNSS stations around the event.
+- `Stations ≤200 km` and `Stations ≤300 km`: candidate GNSS stations around the event for the current data source.
 - `Available`: stations with detected high-rate files for the event window.
 - `Files`: matching high-rate files detected for the event.
 
