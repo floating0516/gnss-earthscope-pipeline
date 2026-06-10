@@ -285,6 +285,22 @@ def earthscope_token() -> str:
     return result.stdout.strip()
 
 
+def check_earthscope_auth() -> tuple[str, str]:
+    login_hint = "run: es login"
+    if shutil.which("es") is None:
+        return "MISSING", f"es command not found; {login_hint} after installing EarthScope CLI"
+    try:
+        result = subprocess.run(["es", "user", "get-access-token"], text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
+    except subprocess.TimeoutExpired:
+        return "FAIL", f"token check timed out; {login_hint}"
+    if result.returncode != 0:
+        detail = next((line.strip() for line in result.stderr.splitlines() if line.strip()), "failed to obtain access token")
+        return "FAIL", f"{detail}; {login_hint}"
+    if not result.stdout.strip():
+        return "FAIL", f"empty access token; {login_hint}"
+    return "OK", "access token available"
+
+
 def fetch_earthscope_metadata(event_time: str, cache_root: Path, token: str | None) -> Path:
     year, doy, start, end = event_day(event_time)
     cache_dir = cache_root / year
@@ -560,6 +576,11 @@ def cmd_check_env(_: argparse.Namespace) -> int:
         print(f"{status}\t{name}\t{value or ''}")
         if not value and name in {"bash", "python3", "timeout", "run-event script", "run-batch script"}:
             failed = True
+    auth_status, auth_detail = check_earthscope_auth()
+    print(f"{auth_status}\tEarthScope auth\t{auth_detail}")
+    if auth_status != "OK":
+        failed = True
+
     pride_bin = os.environ.get("PRIDE_BIN_DIR")
     earthscope_bin = os.environ.get("EARTHSCOPE_ENV_BIN")
     print(f"INFO\tPRIDE_BIN_DIR\t{pride_bin or '(not set)'}")

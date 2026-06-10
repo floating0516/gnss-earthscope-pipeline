@@ -113,8 +113,7 @@ if [[ -z "$RUN_ROOT" ]]; then
   RUN_ROOT="$(pwd)/runs"
 fi
 
-if ! command -v pdp3 >/dev/null 2>&1; then
-  PRIDE_BIN_DIR="${PRIDE_BIN_DIR:-/home/lihe/.PRIDE_PPPAR_BIN}"
+if ! command -v pdp3 >/dev/null 2>&1 && [[ -n "${PRIDE_BIN_DIR:-}" ]]; then
   export PATH="${PRIDE_BIN_DIR}:${PATH}"
 fi
 

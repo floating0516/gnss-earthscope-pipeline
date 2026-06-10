@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 import sys
 import tempfile
@@ -363,6 +364,65 @@ class McpServerTest(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(result["stations"]["count"], 1)
         self.assertEqual(result["stations"]["stations"][0]["station9"], "ABCD00NZL")
+
+    def test_overview_paper_events_reads_normalized_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            event_dir = Path(tmp) / "kaikoura-2016-new-zealand"
+            event_dir.mkdir()
+            (event_dir / "event.json").write_text(
+                json.dumps(
+                    {
+                        "event": "M 7.8 - Kaikoura",
+                        "usgs_event_id": "us1000778i",
+                        "date": "2016-11-13T11:02:56Z",
+                        "magnitude": 7.8,
+                        "stations": 36,
+                        "country": "New Zealand",
+                        "source": "Zenodo: Ruhl et al. 2018 / Kaikoura2016",
+                        "data_type": "direct_waveform",
+                        "paper_title": "High-rate GNSS displacement waveforms for large earthquakes version 2.0",
+                        "paper_url": "https://zenodo.org/records/1434374",
+                        "parse_status": "normalized",
+                        "usgs_place": "53 km NNE of Amberley, New Zealand",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with patch.object(mcp_server, "PAPER_COLLECTION_ROOT", Path(tmp)):
+                result = mcp_server.overview(view="events", source="paper")
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["source"], "paper")
+        self.assertEqual(result["count"], 1)
+        self.assertEqual(result["format"], "normalized_directory")
+        self.assertEqual(result["events"][0]["event_id"], "us1000778i")
+        self.assertEqual(result["events"][0]["dataset_dir"], "kaikoura-2016-new-zealand")
+        self.assertEqual(result["events"][0]["collection_status"], "PAPER_NORMALIZED")
+
+    def test_overview_paper_coverage_marks_collection_status(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            event_dir = Path(tmp) / "ridgecrest-2019-california-m7-1"
+            event_dir.mkdir()
+            (event_dir / "event.json").write_text(
+                json.dumps(
+                    {
+                        "usgs_event_id": "ci38457511",
+                        "date": "2019-07-06T03:19:53Z",
+                        "magnitude": 7.1,
+                        "stations": 490,
+                        "country": "USA",
+                        "usgs_place": "Ridgecrest Earthquake Sequence",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with patch.object(mcp_server, "PAPER_COLLECTION_ROOT", Path(tmp)):
+                result = mcp_server.overview(view="coverage", source="paper")
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["events"][0]["coverage_status"], "COLLECTED_NORMALIZED")
+        self.assertEqual(result["events"][0]["existing_data_status"], "HAS_NORMALIZED")
+        self.assertEqual(result["events"][0]["collection_status"], "PAPER_NORMALIZED")
 
 
 if __name__ == "__main__":

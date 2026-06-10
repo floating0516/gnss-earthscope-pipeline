@@ -244,9 +244,12 @@ if [[ "$SKIP_DOWNLOAD" == "0" && "${#STATIONS[@]}" -eq 0 ]]; then
   exit 1
 fi
 
-PRIDE_BIN_DIR="${PRIDE_BIN_DIR:-/home/lihe/.PRIDE_PPPAR_BIN}"
-LOCAL_BIN_DIR="${LOCAL_BIN_DIR:-/home/lihe/.local/bin}"
-export PATH="${PRIDE_BIN_DIR}:${LOCAL_BIN_DIR}:${PATH}"
+if [[ -n "${PRIDE_BIN_DIR:-}" ]]; then
+  export PATH="${PRIDE_BIN_DIR}:${PATH}"
+fi
+if [[ -n "${LOCAL_BIN_DIR:-}" ]]; then
+  export PATH="${LOCAL_BIN_DIR}:${PATH}"
+fi
 
 echo "Event: ${EVENT_ID}"
 echo "Event time UTC: ${EVENT_TIME_UTC}"

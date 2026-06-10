@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "earthscope": {
+      "type": "stdio",
+      "command": "./scripts/cli/gnss-eq-mcp",
+      "args": [],
+      "env": {}
+    }
+  }
+}

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import json
 import re
 import sqlite3
 import subprocess
@@ -17,6 +18,7 @@ CURRENT_PIPELINE = ROOT / "scripts" / "workflows" / "current_pipeline.sh"
 BATCH_ROOT = ROOT / "data" / "batches"
 DEFAULT_DB = ROOT / "data" / "earthscope_availability" / "earthscope_1hz.sqlite"
 GEONET_DB = ROOT / "data" / "geonet_availability" / "geonet_1hz.sqlite"
+PAPER_COLLECTION_ROOT = ROOT.parent / "openclaw-gnss-collector-agent" / "data" / "gnss_data" / "normalized"
 BATCH_SUMMARY = ROOT / "runs" / "batch-summary.tsv"
 RUNS_ROOT = ROOT / "runs"
 EVENT_ID_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
@@ -104,7 +106,7 @@ def _validate_batch_mode(mode: str) -> str:
 
 
 def _validate_source(source: str) -> str:
-    allowed = {"earthscope", "geonet"}
+    allowed = {"earthscope", "geonet", "paper"}
     if source not in allowed:
         raise ValueError(f"source must be one of: {', '.join(sorted(allowed))}")
     return source
@@ -234,6 +236,48 @@ def _list_geonet_events() -> dict[str, Any]:
         conn.close()
     events = [_coerce_row(dict(row)) for row in rows]
     return {"ok": True, "format": "sqlite", "events": events, "count": len(events)}
+
+
+def _list_paper_events() -> dict[str, Any]:
+    if not PAPER_COLLECTION_ROOT.exists():
+        return {
+            "ok": False,
+            "error_code": "DIRECTORY_NOT_FOUND",
+            "error": f"Directory not found: {_display_path(PAPER_COLLECTION_ROOT)}",
+            "events": [],
+            "count": 0,
+        }
+
+    events = []
+    for event_dir in sorted(path for path in PAPER_COLLECTION_ROOT.iterdir() if path.is_dir() and not path.name.startswith(".")):
+        event_json = event_dir / "event.json"
+        if not event_json.exists():
+            continue
+        payload = json.loads(event_json.read_text(encoding="utf-8"))
+        event_id = str(payload.get("usgs_event_id") or payload.get("event_id") or event_dir.name)
+        events.append(
+            {
+                "event_id": event_id,
+                "dataset_dir": event_dir.name,
+                "magnitude": payload.get("magnitude", ""),
+                "event_date": str(payload.get("date", ""))[:10],
+                "time_utc": payload.get("date", ""),
+                "place": payload.get("usgs_place") or payload.get("place") or payload.get("event") or event_dir.name,
+                "country": payload.get("country", ""),
+                "stations": payload.get("stations", ""),
+                "existing_data_status": "HAS_NORMALIZED",
+                "existing_station_count": payload.get("stations", ""),
+                "source_label": payload.get("source", ""),
+                "paper_title": payload.get("paper_title", ""),
+                "paper_url": payload.get("paper_url", ""),
+                "data_type": payload.get("data_type", ""),
+                "parse_status": payload.get("parse_status", ""),
+                "collection_status": "PAPER_NORMALIZED",
+            }
+        )
+
+    events.sort(key=lambda event: (float(event.get("magnitude") or 0), str(event.get("event_date") or ""), event["event_id"]), reverse=True)
+    return {"ok": True, "format": "normalized_directory", "path": _display_path(PAPER_COLLECTION_ROOT), "events": events, "count": len(events)}
 
 
 def check_env() -> dict[str, Any]:
@@ -423,6 +467,8 @@ def overview(
         return result
 
     if view == "stations":
+        if source == "paper":
+            raise ValueError("stations view is not available for paper source")
         if not event_id:
             raise ValueError("event_id is required for stations view")
         if source == "geonet":
@@ -431,7 +477,12 @@ def overview(
             result["stations"] = _query_station_candidates(event_id=event_id, limit=limit)
         return result
 
-    events_result = _list_geonet_events() if source == "geonet" else _list_events()
+    if source == "paper":
+        events_result = _list_paper_events()
+    elif source == "geonet":
+        events_result = _list_geonet_events()
+    else:
+        events_result = _list_events()
     if not events_result["ok"]:
         return {**result, "ok": False, "events": [], "count": 0, "source": events_result}
 
@@ -453,6 +504,8 @@ def overview(
     result["events"] = events[:limit]
     result["count"] = len(events)
     result["format"] = events_result["format"]
+    if "path" in events_result:
+        result["path"] = events_result["path"]
     return result
 
 

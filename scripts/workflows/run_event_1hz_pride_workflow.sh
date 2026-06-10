@@ -300,10 +300,15 @@ if [[ "$SKIP_DOWNLOAD" == "0" && "${#STATIONS[@]}" -eq 0 ]]; then
   exit 1
 fi
 
-EARTHSCOPE_ENV_BIN="${EARTHSCOPE_ENV_BIN:-/home/lihe/.earthscope_env/bin}"
-PRIDE_BIN_DIR="${PRIDE_BIN_DIR:-/home/lihe/.PRIDE_PPPAR_BIN}"
-LOCAL_BIN_DIR="${LOCAL_BIN_DIR:-/home/lihe/.local/bin}"
-export PATH="${EARTHSCOPE_ENV_BIN}:${PRIDE_BIN_DIR}:${LOCAL_BIN_DIR}:${PATH}"
+if [[ -n "${EARTHSCOPE_ENV_BIN:-}" ]]; then
+  export PATH="${EARTHSCOPE_ENV_BIN}:${PATH}"
+fi
+if [[ -n "${PRIDE_BIN_DIR:-}" ]]; then
+  export PATH="${PRIDE_BIN_DIR}:${PATH}"
+fi
+if [[ -n "${LOCAL_BIN_DIR:-}" ]]; then
+  export PATH="${LOCAL_BIN_DIR}:${PATH}"
+fi
 
 echo "Event: ${EVENT_ID}"
 echo "Event time UTC: ${EVENT_TIME_UTC}"
@@ -731,12 +736,17 @@ normalized_waveform_rows="0"
 normalized_event_grade=""
 normalized_azimuth_bins_covered="0"
 FINAL_NORMALIZED_ROOT="${FINAL_NORMALIZED_ROOT:-${PIPELINE_ROOT}/exports/normalized-ok-stations-us-nz}"
+usable_kin="0"
+if (( kin_count > 0 )) && [[ "$quality_status" != "FAIL" && "$quality_status" != "SKIPPED_NO_KIN" ]]; then
+  usable_kin="1"
+fi
+
 if (( kin_count == 0 )); then
   normalized_status="SKIPPED_NO_KIN"
-elif [[ "$download_status" == "FAIL" || "$process_status" == "FAIL" || "$process_status" == "BLOCKED_OBS_VALIDATION" ]]; then
-  normalized_status="SKIPPED_WORKFLOW_FAILED"
 elif [[ "$quality_status" == "FAIL" ]]; then
   normalized_status="SKIPPED_QUALITY_FAIL"
+elif [[ "$usable_kin" != "1" && ( "$download_status" == "FAIL" || "$process_status" == "FAIL" || "$process_status" == "BLOCKED_OBS_VALIDATION" ) ]]; then
+  normalized_status="SKIPPED_WORKFLOW_FAILED"
 else
   echo
   echo "Normalizing PRIDE kin results..."
@@ -1020,7 +1030,7 @@ echo "JSON summary: ${WORKFLOW_JSON}"
 echo "Machine-readable summary: ${REPORT_DIR}/workflow-summary.tsv"
 
 final_plot_status="SKIPPED"
-if [[ "$SKIP_PLOT" == "0" && "$download_status" != "FAIL" && "$process_status" != "FAIL" && "$process_status" != "BLOCKED_OBS_VALIDATION" && "$quality_status" != "FAIL" && "$normalized_status" == "OK" ]]; then
+if [[ "$SKIP_PLOT" == "0" && "$usable_kin" == "1" && "$normalized_status" == "OK" ]]; then
   echo
   echo "Running final normalized plot stage..."
   FINAL_NORMALIZED_ROOT="${FINAL_NORMALIZED_ROOT:-${PIPELINE_ROOT}/exports/normalized-ok-stations-us-nz}"
@@ -1037,6 +1047,6 @@ if [[ "$SKIP_PLOT" == "0" && "$download_status" != "FAIL" && "$process_status" !
   fi
 fi
 
-if [[ "$download_status" == "FAIL" || "$process_status" == "FAIL" || "$process_status" == "BLOCKED_OBS_VALIDATION" || "$pride_cleanup_status" == "FAIL" || "$obs_cleanup_status" == "FAIL" || "$normalized_status" == "FAIL" || "$final_plot_status" == "FAIL" ]]; then
+if [[ "$usable_kin" != "1" || "$pride_cleanup_status" == "FAIL" || "$obs_cleanup_status" == "FAIL" || "$normalized_status" == "FAIL" || "$final_plot_status" == "FAIL" ]]; then
   exit 1
 fi

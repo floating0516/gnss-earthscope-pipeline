@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "$ROOT"
+
+if command -v gnss-eq-mcp >/dev/null 2>&1; then
+  exec gnss-eq-mcp "$@"
+fi
+
+exec python -m gnss_eq.mcp_server "$@"
