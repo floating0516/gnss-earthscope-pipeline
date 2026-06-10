@@ -5,7 +5,7 @@ import json
 import traceback
 from pathlib import Path
 
-from gnss_eqdata.io import find_event_dirs
+from gnss_eq.data_io import find_event_dirs
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 DEFAULT_DATA_DIR = BASE_DIR / "exports" / "normalized-ok-stations-us-nz"
@@ -55,7 +55,7 @@ def plot_all_main():
         _list_events(base)
         return
 
-    from gnss_eqdata.plotting.record_section import plot_record_section
+    from gnss_eq.plotting.record_section import plot_record_section
 
     outdir = _resolve_outdir(args.outdir)
 
@@ -88,7 +88,7 @@ def plot_all_main():
 
         try:
             if not args.skip_map:
-                from gnss_eqdata.plotting.station_map import plot_station_map
+                from gnss_eq.plotting.station_map import plot_station_map
                 plot_station_map(event_dir, outdir, dpi=args.dpi)
         except Exception as e:
             event_failed = True
@@ -120,7 +120,7 @@ def plot_single_main():
     parser.add_argument("--only", choices=["map", "waveform"], help="Plot only map or waveform")
     args = parser.parse_args()
 
-    from gnss_eqdata.plotting.record_section import plot_record_section
+    from gnss_eq.plotting.record_section import plot_record_section
 
     base = _resolve_data_dir(args.base)
     event_dir = Path(args.event_dir).expanduser()
@@ -140,5 +140,5 @@ def plot_single_main():
     if args.only != "map":
         plot_record_section(event_dir, outdir, dpi=args.dpi)
     if args.only != "waveform":
-        from gnss_eqdata.plotting.station_map import plot_station_map
+        from gnss_eq.plotting.station_map import plot_station_map
         plot_station_map(event_dir, outdir, dpi=args.dpi)

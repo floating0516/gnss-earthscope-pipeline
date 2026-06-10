@@ -5,7 +5,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
-from gnss_eqdata.io import hypocentral_distance, load_event, load_stations, load_waveforms
+from gnss_eq.data_io import hypocentral_distance, load_event, load_stations, load_waveforms
 
 
 def plot_record_section(event_dir: Path, outdir: Path, dpi: int = 150, out_stem: str = None):

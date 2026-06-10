@@ -11,7 +11,7 @@ import sqlite3
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 GA_TOOLS = ROOT / "tools" / "ga_downloader"
 if str(GA_TOOLS) not in sys.path:
     sys.path.insert(0, str(GA_TOOLS))

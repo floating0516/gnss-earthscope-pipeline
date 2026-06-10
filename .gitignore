@@ -14,20 +14,46 @@ htmlcov/
 venv/
 env/
 
-# Claude local session/config files
+# Local credentials and machine-specific configuration
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cert
+*.kubeconfig
+.netrc
+*_token*
+*_secret*
+*credentials*
+*credential*
+
+# Claude/local agent session, index, and config files
 .claude/
+.codegraph/
+.mcp.json
 CLAUDE.md
 
 # Keep this public tree focused on the curated generic workflow plus current data-source adapters.
 docs/*.md
 !docs/ga_event_catalog.md
 scripts/*
-!scripts/build_ga_au_database.py
-!scripts/update_ga_event_highrate_availability.py
-!scripts/run_ga_batch_workflow.sh
-!scripts/run_ga_event_1hz_pride_workflow.sh
-!scripts/normalize_ga_pride_kin_event.py
-!scripts/compute_kin_quality.py
+!scripts/workflows/
+!scripts/database/
+!scripts/availability/
+!scripts/normalize/
+!scripts/quality/
+!scripts/plotting/
+!scripts/cli/
+!scripts/workflows/*
+!scripts/database/*
+!scripts/availability/*
+!scripts/normalize/*
+!scripts/quality/*
+!scripts/plotting/*
+!scripts/cli/*
 tools/earthscope_downloader/
 tools/geonet_downloader/
 tools/renag_downloader/

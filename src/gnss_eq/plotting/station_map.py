@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import pygmt
 
-from gnss_eqdata.io import load_event, load_stations
+from gnss_eq.data_io import load_event, load_stations
 
 BASE_DIR = Path(__file__).resolve().parents[3]
 GMT_DATA_DIR = BASE_DIR / "data" / "gmt"

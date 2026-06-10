@@ -32,15 +32,15 @@ gnss-earthquake-pipeline/
 ├── environment.yml
 ├── pyproject.toml
 ├── scripts/
-│   ├── build_ga_au_database.py
-│   ├── update_ga_event_highrate_availability.py
-│   ├── run_ga_batch_workflow.sh
-│   ├── run_ga_event_1hz_pride_workflow.sh
-│   ├── normalize_ga_pride_kin_event.py
-│   └── compute_kin_quality.py
+│   ├── availability/
+│   ├── database/
+│   ├── normalize/
+│   ├── plotting/
+│   ├── quality/
+│   └── workflows/
 ├── src/
-│   ├── gnss_eq/
-│   └── gnss_eqdata/
+│   └── gnss_eq/
+│       └── plotting/
 ├── tests/
 └── tools/
     ├── ga_downloader/
@@ -86,27 +86,27 @@ The current data-source adapter uses GA/Geoscience Australia high-rate GNSS acce
 Build or update the event/station database:
 
 ```bash
-python scripts/build_ga_au_database.py --help
-python scripts/update_ga_event_highrate_availability.py --help
+python scripts/database/build_ga_au_database.py --help
+python scripts/availability/update_ga_event_highrate_availability.py --help
 ```
 
 Run event workflows:
 
 ```bash
-scripts/run_ga_event_1hz_pride_workflow.sh --help
-scripts/run_ga_batch_workflow.sh --help
+scripts/workflows/run_ga_event_1hz_pride_workflow.sh --help
+scripts/workflows/run_ga_batch_workflow.sh --help
 ```
 
 Normalize PRIDE KIN outputs:
 
 ```bash
-python scripts/normalize_ga_pride_kin_event.py --help
+python scripts/normalize/normalize_ga_pride_kin_event.py --help
 ```
 
 Compute KIN quality summaries:
 
 ```bash
-python scripts/compute_kin_quality.py --help
+python scripts/quality/compute_kin_quality.py --help
 ```
 
 ## Tests
@@ -151,15 +151,15 @@ gnss-earthquake-pipeline/
 ├── environment.yml
 ├── pyproject.toml
 ├── scripts/
-│   ├── build_ga_au_database.py
-│   ├── update_ga_event_highrate_availability.py
-│   ├── run_ga_batch_workflow.sh
-│   ├── run_ga_event_1hz_pride_workflow.sh
-│   ├── normalize_ga_pride_kin_event.py
-│   └── compute_kin_quality.py
+│   ├── availability/
+│   ├── database/
+│   ├── normalize/
+│   ├── plotting/
+│   ├── quality/
+│   └── workflows/
 ├── src/
-│   ├── gnss_eq/
-│   └── gnss_eqdata/
+│   └── gnss_eq/
+│       └── plotting/
 ├── tests/
 └── tools/
     ├── ga_downloader/
@@ -205,27 +205,27 @@ pip install -e .
 构建或更新事件/台站数据库：
 
 ```bash
-python scripts/build_ga_au_database.py --help
-python scripts/update_ga_event_highrate_availability.py --help
+python scripts/database/build_ga_au_database.py --help
+python scripts/availability/update_ga_event_highrate_availability.py --help
 ```
 
 运行事件工作流：
 
 ```bash
-scripts/run_ga_event_1hz_pride_workflow.sh --help
-scripts/run_ga_batch_workflow.sh --help
+scripts/workflows/run_ga_event_1hz_pride_workflow.sh --help
+scripts/workflows/run_ga_batch_workflow.sh --help
 ```
 
 标准化 PRIDE KIN 输出：
 
 ```bash
-python scripts/normalize_ga_pride_kin_event.py --help
+python scripts/normalize/normalize_ga_pride_kin_event.py --help
 ```
 
 计算 KIN 质量摘要：
 
 ```bash
-python scripts/compute_kin_quality.py --help
+python scripts/quality/compute_kin_quality.py --help
 ```
 
 ## 测试

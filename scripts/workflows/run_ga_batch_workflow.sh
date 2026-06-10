@@ -41,7 +41,7 @@ EOF
 }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PIPELINE_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+PIPELINE_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 WORKFLOW="${SCRIPT_DIR}/run_ga_event_1hz_pride_workflow.sh"
 
 absolute_path() {

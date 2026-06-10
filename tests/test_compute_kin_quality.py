@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 
 
-MODULE_PATH = Path(__file__).resolve().parents[1] / "scripts" / "compute_kin_quality.py"
+MODULE_PATH = Path(__file__).resolve().parents[1] / "scripts" / "quality" / "compute_kin_quality.py"
 SPEC = importlib.util.spec_from_file_location("compute_kin_quality", MODULE_PATH)
 compute_kin_quality = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None

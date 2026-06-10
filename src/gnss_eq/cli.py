@@ -64,7 +64,7 @@ def cmd_run_event(args: argparse.Namespace) -> int:
     run_root = absolute_path(args.run_root)
     obs_root = absolute_path(args.obs_root)
     cmd = [
-        str(SCRIPTS / "run_event_1hz_pride_workflow.sh"),
+        str(SCRIPTS / "workflows" / "run_event_1hz_pride_workflow.sh"),
         "--event-id",
         args.event_id,
         "--event-time",
@@ -114,7 +114,7 @@ def cmd_run_batch(args: argparse.Namespace) -> int:
         print(f"State CSV: {csv_path}", file=sys.stderr)
 
     cmd = [
-        str(SCRIPTS / "run_event_batch_workflow.sh"),
+        str(SCRIPTS / "workflows" / "run_event_batch_workflow.sh"),
         "--csv",
         csv_path,
         "--timeout",
@@ -161,7 +161,7 @@ def cmd_quality(args: argparse.Namespace) -> int:
         )
     cmd = [
         sys.executable,
-        str(SCRIPTS / "compute_kin_quality.py"),
+        str(SCRIPTS / "quality" / "compute_kin_quality.py"),
         "--event-time",
         args.event_time,
         "--expected-hours-each-side",
@@ -188,7 +188,7 @@ def cmd_quality(args: argparse.Namespace) -> int:
 def cmd_update_availability(args: argparse.Namespace) -> int:
     cmd = [
         sys.executable,
-        str(SCRIPTS / "update_earthscope_availability.py"),
+        str(SCRIPTS / "availability" / "update_earthscope_availability.py"),
         "--db",
         args.db,
         "--delay",
@@ -547,8 +547,8 @@ def cmd_check_env(_: argparse.Namespace) -> int:
         ("python3", shutil.which("python3")),
         ("timeout", shutil.which("timeout")),
         ("pdp3", shutil.which("pdp3")),
-        ("run-event script", str(SCRIPTS / "run_event_1hz_pride_workflow.sh") if (SCRIPTS / "run_event_1hz_pride_workflow.sh").exists() else None),
-        ("run-batch script", str(SCRIPTS / "run_event_batch_workflow.sh") if (SCRIPTS / "run_event_batch_workflow.sh").exists() else None),
+        ("run-event script", str(SCRIPTS / "workflows" / "run_event_1hz_pride_workflow.sh") if (SCRIPTS / "workflows" / "run_event_1hz_pride_workflow.sh").exists() else None),
+        ("run-batch script", str(SCRIPTS / "workflows" / "run_event_batch_workflow.sh") if (SCRIPTS / "workflows" / "run_event_batch_workflow.sh").exists() else None),
         ("downloader script", str(DOWNLOADER_TOOLS / "download_earthscope_default.sh") if (DOWNLOADER_TOOLS / "download_earthscope_default.sh").exists() else None),
         ("PRIDE processor script", str(PRIDE_TOOLS / "process_event_window.sh") if (PRIDE_TOOLS / "process_event_window.sh").exists() else None),
         ("ENU plot script", str(PRIDE_TOOLS / "plot_enu_svg.py") if (PRIDE_TOOLS / "plot_enu_svg.py").exists() else None),

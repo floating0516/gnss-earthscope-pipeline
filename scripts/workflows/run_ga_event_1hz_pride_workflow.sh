@@ -54,12 +54,12 @@ EOF
 }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PIPELINE_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+PIPELINE_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 DOWNLOADER="${PIPELINE_ROOT}/tools/ga_downloader/fetch_ga_1hz.py"
 PRIDE_PROCESSOR="${PIPELINE_ROOT}/tools/pride_processor/process_event_window.sh"
 PRIDE_CLEANER="${PIPELINE_ROOT}/tools/pride_processor/cleanup_pride_workdir.sh"
-QUALITY_SCRIPT="${PIPELINE_ROOT}/scripts/compute_kin_quality.py"
-NORMALIZER="${PIPELINE_ROOT}/scripts/normalize_ga_pride_kin_event.py"
+QUALITY_SCRIPT="${PIPELINE_ROOT}/scripts/quality/compute_kin_quality.py"
+NORMALIZER="${PIPELINE_ROOT}/scripts/normalize/normalize_ga_pride_kin_event.py"
 
 absolute_path() {
   realpath -m -- "$1"
@@ -380,7 +380,7 @@ if [[ "$DRY_RUN" == "1" ]]; then
   printf '  python3 %q --workflow-summary %q --quality-json %q --db %q --normalized-root %q --include-warn\n' \
     "$NORMALIZER" "${REPORT_DIR}/workflow-summary.json" "${REPORT_DIR}/kin-quality.json" "${PIPELINE_ROOT}/data/ga_availability/ga_1hz.sqlite" "${PIPELINE_ROOT}/exports/normalized-ok-stations-us-nz"
   if [[ "$SKIP_PLOT" == "0" ]]; then
-    printf '  final normalized figures from %q after normalization\n' "${PIPELINE_ROOT}/scripts/plot_completed_normalized_event.py"
+    printf '  final normalized figures from %q after normalization\n' "${PIPELINE_ROOT}/scripts/plotting/plot_completed_normalized_event.py"
   fi
   exit 0
 fi
@@ -1155,7 +1155,7 @@ if [[ "$SKIP_PLOT" == "0" && "$download_status" != "FAIL" && "$process_status" !
   if [[ ! -x "$FINAL_PLOT_PYTHON" ]]; then
     FINAL_PLOT_PYTHON="python3"
   fi
-  if "$FINAL_PLOT_PYTHON" "${PIPELINE_ROOT}/scripts/plot_completed_normalized_event.py" --workflow-summary "$WORKFLOW_JSON" --normalized-root "$FINAL_NORMALIZED_ROOT" --outdir "$FINAL_FIGURE_DIR" > "${LOG_DIR}/plot-final-normalized.log" 2>&1; then
+  if "$FINAL_PLOT_PYTHON" "${PIPELINE_ROOT}/scripts/plotting/plot_completed_normalized_event.py" --workflow-summary "$WORKFLOW_JSON" --normalized-root "$FINAL_NORMALIZED_ROOT" --outdir "$FINAL_FIGURE_DIR" > "${LOG_DIR}/plot-final-normalized.log" 2>&1; then
     final_plot_status="OK"
     grep -E '(^/|^figure/).*\.png$' "${LOG_DIR}/plot-final-normalized.log" > "${MANIFEST_DIR}/plot-files.txt" || true
     plot_count="$(grep -cve '^$' "${MANIFEST_DIR}/plot-files.txt" || true)"

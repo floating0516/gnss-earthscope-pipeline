@@ -9,8 +9,12 @@ description = "1 Hz GNSS earthquake download, PRIDE PPP-AR processing, and batch
 requires-python = ">=3.10"
 dependencies = []
 
+[project.optional-dependencies]
+mcp = ["mcp"]
+
 [project.scripts]
 gnss-eq = "gnss_eq.cli:main"
+gnss-eq-mcp = "gnss_eq.mcp_server:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Normalize GA PRIDE kin_* outputs into the existing plotting export format."""
+"""Normalize PRIDE kin_* outputs into the plotting export format."""
 
 from __future__ import annotations
 
@@ -15,22 +15,11 @@ from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 
-SCRIPT_DIR = Path(__file__).resolve().parent
-if str(SCRIPT_DIR) not in sys.path:
-    sys.path.insert(0, str(SCRIPT_DIR))
+QUALITY_DIR = Path(__file__).resolve().parents[1] / "quality"
+if str(QUALITY_DIR) not in sys.path:
+    sys.path.insert(0, str(QUALITY_DIR))
 
 from compute_kin_quality import kin_to_enu, parse_utc, station_from_path
-
-
-SOURCE = {
-    "event_table": "ga_m6plus_events_au",
-    "candidate_tables": ["event_ga_station_candidates"],
-    "slug_prefix": "au",
-    "country": "Australia / Southwest Pacific",
-    "region": "AU-SW-Pacific",
-    "network": "Geoscience Australia",
-    "source_label": "Geoscience Australia PRIDE PPP-AR kin quality-passing stations",
-}
 
 
 def parse_args() -> argparse.Namespace:
@@ -67,7 +56,7 @@ def make_slug(event: dict) -> str:
     magnitude = short_float(event.get("magnitude"))
     date = str(event.get("time_utc") or event.get("event_date") or "")[:10].replace("-", "")
     place = slug_part(event.get("place"))
-    return f"{SOURCE['slug_prefix']}-{event_id}-m{magnitude}-{date}-{place}".strip("-")
+    return f"us-{event_id}-m{magnitude}-{date}-{place}".strip("-")
 
 
 def connect_db(path: Path) -> sqlite3.Connection:
@@ -82,7 +71,7 @@ def read_event(conn: sqlite3.Connection, event_id: str, fallback_time: str) -> d
     row = conn.execute(
         """
         SELECT event_id, title, time_utc, event_date, magnitude, longitude, latitude, depth_km, place, usgs_url
-        FROM ga_m6plus_events_au
+        FROM usgs_m6plus_events_usa
         WHERE event_id = ?
         """,
         (event_id,),
@@ -105,24 +94,28 @@ def read_event(conn: sqlite3.Connection, event_id: str, fallback_time: str) -> d
 
 def read_station_metadata(conn: sqlite3.Connection, event_id: str) -> dict[str, dict[str, float]]:
     metadata: dict[str, dict[str, float]] = {}
-    rows = conn.execute(
-        """
-        SELECT station, station_latitude, station_longitude, MIN(distance_km) AS distance_km
-        FROM event_ga_station_candidates
-        WHERE event_id = ?
-          AND station_latitude IS NOT NULL
-          AND station_longitude IS NOT NULL
-        GROUP BY station
-        """,
-        (event_id,),
-    ).fetchall()
-    for row in rows:
-        station = str(row["station"]).upper()
-        metadata[station] = {
-            "latitude": float(row["station_latitude"]),
-            "longitude": float(row["station_longitude"]),
-            "distance_km": float(row["distance_km"]) if row["distance_km"] is not None else math.nan,
-        }
+    for table in ["event_earthscope_station_verified_files", "event_earthscope_station_candidates"]:
+        rows = conn.execute(
+            f"""
+            SELECT station, station_latitude, station_longitude, MIN(distance_km) AS distance_km
+            FROM {table}
+            WHERE event_id = ?
+              AND station_latitude IS NOT NULL
+              AND station_longitude IS NOT NULL
+            GROUP BY station
+            """,
+            (event_id,),
+        ).fetchall()
+        for row in rows:
+            station = str(row["station"]).upper()
+            metadata.setdefault(
+                station,
+                {
+                    "latitude": float(row["station_latitude"]),
+                    "longitude": float(row["station_longitude"]),
+                    "distance_km": float(row["distance_km"]) if row["distance_km"] is not None else math.nan,
+                },
+            )
     return metadata
 
 
@@ -222,8 +215,8 @@ def event_json(event: dict, station_count: int, workflow_summary: Path, grade: d
         "depth_km": event.get("depth_km"),
         "magnitude": event.get("magnitude"),
         "stations": station_count,
-        "country": SOURCE["country"],
-        "source": SOURCE["source_label"],
+        "country": "United States",
+        "source": "EarthScope PRIDE PPP-AR kin quality-passing stations",
         "data_type": "gnss_displacement_waveform",
         "paper_title": "",
         "paper_url": "",
@@ -233,8 +226,8 @@ def event_json(event: dict, station_count: int, workflow_summary: Path, grade: d
         "usgs_detail_url": event.get("usgs_url") or "",
         "usgs_place": event.get("place") or "",
         "place": event.get("place") or "",
-        "region": SOURCE["region"],
-        "network": SOURCE["network"],
+        "region": "US",
+        "network": "EarthScope",
         "workflow_summary": str(workflow_summary),
         "quality_filter": metadata["quality_filter"],
         "event_grade": grade["grade"],
@@ -254,12 +247,6 @@ def write_outputs(args: argparse.Namespace, summary: dict, quality: dict) -> dic
         raise SystemExit("Workflow summary is missing event.id or event.time_utc")
 
     event_time = parse_utc(event_time_text)
-    pride_event_time_text = str(summary.get("pride", {}).get("event_time_utc") or "").strip()
-    if pride_event_time_text and parse_utc(pride_event_time_text) != event_time:
-        raise SystemExit(
-            "Workflow summary has mismatched event.time_utc and pride.event_time_utc; "
-            "GA normalization requires both to be the true USGS origin time."
-        )
     conn = connect_db(args.db)
     try:
         event = read_event(conn, event_id, event_time_text)
@@ -357,7 +344,7 @@ def write_outputs(args: argparse.Namespace, summary: dict, quality: dict) -> dic
     (output_dir / "event.json").write_text(json.dumps(event_payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
     provenance = {
-        "source_label": f"{SOURCE['network']} PRIDE PPP-AR / {event_id}",
+        "source_label": f"EarthScope PRIDE PPP-AR / {event_id}",
         "data_type": "gnss_displacement_waveform",
         "format_hint": "normalized_waveforms_csv_gz",
         "sampling_hz": sorted({row["Sampling_Hz"] for row in station_rows}),
@@ -368,11 +355,7 @@ def write_outputs(args: argparse.Namespace, summary: dict, quality: dict) -> dic
         "station_count": len(station_rows),
         "waveform_rows": waveform_rows,
         "event_id": event_id,
-        "event_time_source": "workflow_summary.event.time_utc",
-        "ga_download_window_mode": summary.get("ga_download", {}).get("download_window_mode", ""),
-        "ga_required_slots_utc": summary.get("ga_download", {}).get("required_slots_utc", []),
-        "pride_window_start_utc": summary.get("pride", {}).get("window_start_utc", ""),
-        "pride_window_end_utc": summary.get("pride", {}).get("window_end_utc", ""),
+        "event_grade": grade,
         "normalization": normalization_metadata(args.include_warn),
         "quality_summary": quality.get("summary", {}),
         "station_quality_counts": dict(Counter(row["Quality_Status"] for row in station_rows)),

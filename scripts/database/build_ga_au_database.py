@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 GA_TOOLS = ROOT / "tools" / "ga_downloader"
 if str(GA_TOOLS) not in sys.path:
     sys.path.insert(0, str(GA_TOOLS))
