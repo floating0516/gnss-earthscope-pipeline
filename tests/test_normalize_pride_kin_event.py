@@ -48,6 +48,54 @@ class NormalizePrideKinEventTest(unittest.TestCase):
         self.assertEqual(event["title"], "Mexico event")
         self.assertEqual(event["magnitude"], 7.6)
 
+    def test_event_json_keeps_us_labels_for_usa_subset(self):
+        payload = normalize.event_json(
+            {
+                "event_id": "nc123",
+                "title": "US event",
+                "time_utc": "2020-01-01T00:00:00Z",
+                "longitude": -124.0,
+                "latitude": 40.0,
+                "depth_km": 10.0,
+                "magnitude": 6.2,
+                "place": "California",
+                "usgs_url": "",
+                "earthscope_subset": "usa",
+            },
+            1,
+            Path("workflow-summary.json"),
+            normalize.event_grade([{"Azimuth_Deg": ""}]),
+            True,
+        )
+
+        self.assertEqual(payload["country"], "United States")
+        self.assertEqual(payload["region"], "US")
+        self.assertEqual(payload["earthscope_subset"], "usa")
+
+    def test_event_json_uses_americas_labels_for_nonconus_subset(self):
+        payload = normalize.event_json(
+            {
+                "event_id": "us7000irjd",
+                "title": "Mexico event",
+                "time_utc": "2022-11-22T16:39:05Z",
+                "longitude": -116.4,
+                "latitude": 30.8,
+                "depth_km": 10.0,
+                "magnitude": 6.2,
+                "place": "Mexico",
+                "usgs_url": "",
+                "earthscope_subset": "nonconus",
+            },
+            1,
+            Path("workflow-summary.json"),
+            normalize.event_grade([{"Azimuth_Deg": ""}]),
+            True,
+        )
+
+        self.assertEqual(payload["country"], "Americas")
+        self.assertEqual(payload["region"], "Americas")
+        self.assertEqual(payload["earthscope_subset"], "nonconus")
+
     def test_write_outputs_skips_quality_station_with_missing_coordinates(self):
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)

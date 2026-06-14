@@ -79,9 +79,12 @@ def existing_table(conn: sqlite3.Connection, names: list[str]) -> str | None:
 
 
 def read_event(conn: sqlite3.Connection, event_id: str, fallback_time: str) -> dict:
-    event_table = existing_table(conn, ["usgs_m6plus_events_usa", "usgs_m6plus_events_earthscope_nonconus"])
-    row = None
-    if event_table:
+    for event_table, subset in [
+        ("usgs_m6plus_events_usa", "usa"),
+        ("usgs_m6plus_events_earthscope_nonconus", "nonconus"),
+    ]:
+        if not existing_table(conn, [event_table]):
+            continue
         row = conn.execute(
             f"""
             SELECT event_id, title, time_utc, event_date, magnitude, longitude, latitude, depth_km, place, usgs_url
@@ -90,8 +93,10 @@ def read_event(conn: sqlite3.Connection, event_id: str, fallback_time: str) -> d
             """,
             (event_id,),
         ).fetchone()
-    if row:
-        return dict(row)
+        if row:
+            event = dict(row)
+            event["earthscope_subset"] = subset
+            return event
     return {
         "event_id": event_id,
         "title": event_id,
@@ -103,6 +108,7 @@ def read_event(conn: sqlite3.Connection, event_id: str, fallback_time: str) -> d
         "depth_km": None,
         "place": event_id,
         "usgs_url": "",
+        "earthscope_subset": "unknown",
     }
 
 
@@ -226,6 +232,9 @@ def event_json(
 ) -> dict:
     title = event.get("title") or event.get("place") or event.get("event_id")
     metadata = normalization_metadata(include_warn)
+    subset = event.get("earthscope_subset") or "unknown"
+    country = "Americas" if subset == "nonconus" else "United States"
+    region = "Americas" if subset == "nonconus" else "US"
     return {
         "event": title,
         "usgs_event_id": event.get("event_id"),
@@ -236,7 +245,7 @@ def event_json(
         "depth_km": event.get("depth_km"),
         "magnitude": event.get("magnitude"),
         "stations": station_count,
-        "country": "United States",
+        "country": country,
         "source": "EarthScope PRIDE PPP-AR kin quality-passing stations",
         "data_type": "gnss_displacement_waveform",
         "paper_title": "",
@@ -247,7 +256,8 @@ def event_json(
         "usgs_detail_url": event.get("usgs_url") or "",
         "usgs_place": event.get("place") or "",
         "place": event.get("place") or "",
-        "region": "US",
+        "region": region,
+        "earthscope_subset": subset,
         "network": "EarthScope",
         "workflow_summary": str(workflow_summary),
         "quality_filter": metadata["quality_filter"],
@@ -379,6 +389,7 @@ def write_outputs(args: argparse.Namespace, summary: dict, quality: dict) -> dic
         "station_count": len(station_rows),
         "waveform_rows": waveform_rows,
         "event_id": event_id,
+        "earthscope_subset": event.get("earthscope_subset") or "unknown",
         "event_grade": grade,
         "normalization": normalization_metadata(args.include_warn),
         "quality_summary": quality.get("summary", {}),
