@@ -36,12 +36,12 @@ WORLD_RELIEF = next(
 )
 
 MAGNITUDE_LEGEND_FILL = "170/170/170"
-PEN_COLOR = "0.3p,white"
+PEN_COLOR = "0.25p,white"
 CATEGORY_COLORS = {
-    "EarthScope / US": "30/105/180",
-    "EarthScope / Americas": "215/75/55",
-    "GeoNet / New Zealand": "40/150/95",
-    "GA / Australia-SW Pacific": "140/90/190",
+    "EarthScope / US": "204/187/68",
+    "EarthScope / Americas": "238/102/119",
+    "GeoNet / New Zealand": "34/136/51",
+    "GA / Australia-SW Pacific": "170/51/119",
     "Unknown": "120/120/120",
 }
 CATEGORY_ORDER = [
@@ -137,12 +137,12 @@ def main():
         projection="R180/22c",
         frame=[
             "afg",
-            f"WSnE+tGNSS Earthquake Events+s{year_range}  ·  n = {n_total}",
+            f"WSnE+tGNSS Earthquake Events+s{year_range}; n = {n_total}",
         ],
     )
 
     pygmt.makecpt(cmap="geo", series=[-8000, 8000])
-    fig.grdimage(str(WORLD_RELIEF), shading="+d+a45+nt0.3", cmap=True, transparency=30)
+    fig.grdimage(str(WORLD_RELIEF), shading="+d+a45+nt0.3", cmap=True, transparency=45)
 
     fig.coast(
         shorelines="0.4p,gray30",
@@ -161,7 +161,7 @@ def main():
             size=[mag_to_size(event["magnitude"])],
             fill=CATEGORY_COLORS[category],
             pen=PEN_COLOR,
-            transparency=30,
+            transparency=0,
         )
 
     s6 = mag_to_size(6)
