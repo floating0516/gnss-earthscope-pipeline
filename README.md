@@ -14,7 +14,7 @@ The full `data/`, `runs/`, `exports/`, and bulk `figure/` directories are local 
 
 ### Global station/event coverage
 
-The current normalized export contains 141 events: 62 EarthScope/GAGE events from the United States, 59 EarthScope/GAGE events from the nearby Americas, 18 GeoNet events from New Zealand, and 2 GA/Geoscience Australia events from Australia and the southwest Pacific.
+The current normalized export contains 141 events: 62 EarthScope/GAGE events from the United States, 59 EarthScope/GAGE events from the nearby Americas, 18 GeoNet events from New Zealand, and 2 GA/Geoscience Australia events from Australia and the southwest Pacific. Marker color indicates source/region, and marker size scales with earthquake magnitude.
 
 ![Global GNSS station/event map](docs/images/world_map.png)
 
@@ -142,7 +142,7 @@ python -m unittest discover tests
 
 ### 全球台站/事件分布图
 
-当前 normalized export 共包含 141 个事件：62 个 EarthScope/GAGE 美国事件、59 个 EarthScope/GAGE 美国周边美洲区域事件、18 个 GeoNet 新西兰事件，以及 2 个 GA/Geoscience Australia 澳大利亚和西南太平洋事件。
+当前 normalized export 共包含 141 个事件：62 个 EarthScope/GAGE 美国事件、59 个 EarthScope/GAGE 美国周边美洲区域事件、18 个 GeoNet 新西兰事件，以及 2 个 GA/Geoscience Australia 澳大利亚和西南太平洋事件。图中标记颜色表示数据来源/区域，标记大小随地震震级缩放。
 
 ![全球 GNSS 台站/事件地图](docs/images/world_map.png)
 

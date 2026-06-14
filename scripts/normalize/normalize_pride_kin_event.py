@@ -222,6 +222,37 @@ def sampling_hz(series: list[tuple]) -> float:
     return round(1.0 / median_interval, 6) if median_interval > 0 else 1.0
 
 
+EARTHSCOPE_COUNTRY_PATTERNS = [
+    ("antigua and barbuda", "Antigua and Barbuda"),
+    ("costa rica", "Costa Rica"),
+    ("cuba", "Cuba"),
+    ("dominican republic", "Dominican Republic"),
+    ("el salvador", "El Salvador"),
+    ("guadeloupe", "Guadeloupe"),
+    ("guatemala", "Guatemala"),
+    ("honduras", "Honduras"),
+    ("jamaica", "Jamaica"),
+    ("mexico", "Mexico"),
+    ("nicaragua", "Nicaragua"),
+    ("panama", "Panama"),
+    ("puerto rico", "Puerto Rico"),
+    ("venezuela", "Venezuela"),
+    ("haiti", "Haiti"),
+]
+
+
+def earthscope_country(event: dict) -> str:
+    subset = event.get("earthscope_subset") or "unknown"
+    if subset != "nonconus":
+        return "United States"
+    text = " ".join(str(event.get(key) or "") for key in ["place", "title"])
+    text = text.casefold()
+    for pattern, country in EARTHSCOPE_COUNTRY_PATTERNS:
+        if pattern in text:
+            return country
+    return "Americas"
+
+
 def event_json(
     event: dict,
     station_count: int,
@@ -233,7 +264,7 @@ def event_json(
     title = event.get("title") or event.get("place") or event.get("event_id")
     metadata = normalization_metadata(include_warn)
     subset = event.get("earthscope_subset") or "unknown"
-    country = "Americas" if subset == "nonconus" else "United States"
+    country = earthscope_country(event)
     region = "Americas" if subset == "nonconus" else "US"
     return {
         "event": title,

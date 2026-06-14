@@ -2,9 +2,9 @@
 """
 Plot all GNSS earthquake events on a Pacific-centered world map.
 
-Both datasets (GNSS_EQDATA + GNSS_EQDATA_self) shown together:
+Normalized GNSS earthquake events shown together:
   - Pacific-centered Robinson projection
-  - Crimson circles with white outline, size scaled by magnitude
+  - Circles colored by source/region, with size scaled by magnitude
   - Large events drawn first so small events appear on top
   - Ocean bathymetry background; solid land color (no speckles)
 
@@ -35,8 +35,22 @@ WORLD_RELIEF = next(
     Path("@earth_relief_10m"),
 )
 
-FILL_COLOR = "190/30/45"
-PEN_COLOR  = "0.3p,white"
+MAGNITUDE_LEGEND_FILL = "170/170/170"
+PEN_COLOR = "0.3p,white"
+CATEGORY_COLORS = {
+    "EarthScope / US": "30/105/180",
+    "EarthScope / Americas": "215/75/55",
+    "GeoNet / New Zealand": "40/150/95",
+    "GA / Australia-SW Pacific": "140/90/190",
+    "Unknown": "120/120/120",
+}
+CATEGORY_ORDER = [
+    "EarthScope / US",
+    "EarthScope / Americas",
+    "GeoNet / New Zealand",
+    "GA / Australia-SW Pacific",
+    "Unknown",
+]
 
 
 def load_events(base: Path) -> list[dict]:
@@ -54,6 +68,21 @@ def load_events(base: Path) -> list[dict]:
 def mag_to_size(mag: float) -> float:
     """Size scale with moderate ratio: M6→0.09c, M7→0.17c, M8→0.32c, M9→0.58c."""
     return 0.09 * (1.85 ** (mag - 6.0))
+
+
+def event_category(event: dict) -> str:
+    region = str(event.get("region") or "")
+    network = str(event.get("network") or "")
+    subset = str(event.get("earthscope_subset") or "")
+    if subset == "usa" or region == "US":
+        return "EarthScope / US"
+    if subset == "nonconus" or region == "Americas":
+        return "EarthScope / Americas"
+    if region == "NZ" or network == "GeoNet":
+        return "GeoNet / New Zealand"
+    if region == "AU-SW-Pacific" or network == "Geoscience Australia":
+        return "GA / Australia-SW Pacific"
+    return "Unknown"
 
 
 def main():
@@ -84,7 +113,7 @@ def main():
     all_events.sort(key=lambda e: e["magnitude"], reverse=True)
 
     years = sorted(e["date"][:4] for e in all_events)
-    year_range = f"{years[0]}–{years[-1]}"
+    year_range = f"{years[0]}-{years[-1]}"
     n_total = len(all_events)
 
     for path, events in groups:
@@ -122,15 +151,18 @@ def main():
         resolution="l",
     )
 
-    fig.plot(
-        x=[e["longitude"] for e in all_events],
-        y=[e["latitude"] for e in all_events],
-        style="cc",
-        size=[mag_to_size(e["magnitude"]) for e in all_events],
-        fill=FILL_COLOR,
-        pen=PEN_COLOR,
-        transparency=30,
-    )
+    categories = {event_category(event) for event in all_events}
+    for event in all_events:
+        category = event_category(event)
+        fig.plot(
+            x=[event["longitude"]],
+            y=[event["latitude"]],
+            style="cc",
+            size=[mag_to_size(event["magnitude"])],
+            fill=CATEGORY_COLORS[category],
+            pen=PEN_COLOR,
+            transparency=30,
+        )
 
     s6 = mag_to_size(6)
     s7 = mag_to_size(7)
@@ -138,14 +170,20 @@ def main():
     s9 = mag_to_size(9)
     legend_spec = (
         "G 0.08c\n"
-        "L 1.1 1 L Magnitude:\n"
+        "L 1.1 1 L Magnitude (size):\n"
         "G 0.06c\n"
-        f"S 0.35c c {s6:.3f}c {FILL_COLOR} {PEN_COLOR} 0.82c  M 6\n"
-        f"S 0.35c c {s7:.3f}c {FILL_COLOR} {PEN_COLOR} 0.82c  M 7\n"
-        f"S 0.35c c {s8:.3f}c {FILL_COLOR} {PEN_COLOR} 0.82c  M 8\n"
-        f"S 0.35c c {s9:.3f}c {FILL_COLOR} {PEN_COLOR} 0.82c  M 9\n"
-        "G 0.05c\n"
+        f"S 0.35c c {s6:.3f}c {MAGNITUDE_LEGEND_FILL} {PEN_COLOR} 0.82c  M 6\n"
+        f"S 0.35c c {s7:.3f}c {MAGNITUDE_LEGEND_FILL} {PEN_COLOR} 0.82c  M 7\n"
+        f"S 0.35c c {s8:.3f}c {MAGNITUDE_LEGEND_FILL} {PEN_COLOR} 0.82c  M 8\n"
+        f"S 0.35c c {s9:.3f}c {MAGNITUDE_LEGEND_FILL} {PEN_COLOR} 0.82c  M 9\n"
+        "G 0.10c\n"
+        "L 1.1 1 L Source / region (color):\n"
+        "G 0.06c\n"
     )
+    for category in CATEGORY_ORDER:
+        if category in categories:
+            legend_spec += f"S 0.35c c 0.13c {CATEGORY_COLORS[category]} {PEN_COLOR} 0.82c  {category}\n"
+    legend_spec += "G 0.05c\n"
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as tmp:
         tmp.write(legend_spec)

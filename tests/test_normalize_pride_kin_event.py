@@ -72,7 +72,7 @@ class NormalizePrideKinEventTest(unittest.TestCase):
         self.assertEqual(payload["region"], "US")
         self.assertEqual(payload["earthscope_subset"], "usa")
 
-    def test_event_json_uses_americas_labels_for_nonconus_subset(self):
+    def test_event_json_uses_country_and_americas_region_for_nonconus_subset(self):
         payload = normalize.event_json(
             {
                 "event_id": "us7000irjd",
@@ -82,7 +82,7 @@ class NormalizePrideKinEventTest(unittest.TestCase):
                 "latitude": 30.8,
                 "depth_km": 10.0,
                 "magnitude": 6.2,
-                "place": "Mexico",
+                "place": "28 km SW of Las Brisas, Mexico",
                 "usgs_url": "",
                 "earthscope_subset": "nonconus",
             },
@@ -92,9 +92,24 @@ class NormalizePrideKinEventTest(unittest.TestCase):
             True,
         )
 
-        self.assertEqual(payload["country"], "Americas")
+        self.assertEqual(payload["country"], "Mexico")
         self.assertEqual(payload["region"], "Americas")
         self.assertEqual(payload["earthscope_subset"], "nonconus")
+
+    def test_earthscope_country_derives_known_nonconus_countries(self):
+        cases = [
+            ("28 km SW of Las Brisas, Mexico", "Mexico"),
+            ("Nippes, Haiti", "Haiti"),
+            ("40 km WSW of Pointe-Noire, Guadeloupe", "Guadeloupe"),
+            ("42 km SSW of Bartolomé Masó, Cuba", "Cuba"),
+            ("Unknown offshore event", "Americas"),
+        ]
+        for place, expected in cases:
+            with self.subTest(place=place):
+                self.assertEqual(
+                    normalize.earthscope_country({"place": place, "earthscope_subset": "nonconus"}),
+                    expected,
+                )
 
     def test_write_outputs_skips_quality_station_with_missing_coordinates(self):
         with tempfile.TemporaryDirectory() as tmp:
