@@ -29,6 +29,8 @@ Forwarded workflow options:
   --process-jobs N          Number of station PRIDE jobs to run concurrently. Default: 1
   --run-root DIR            Workflow run root. Default: ./runs
   --obs-root DIR            Canonical obs root. Default: ./data/obs
+  --normalize-db FILE       SQLite DB for normalization station coordinates. Default: data/earthscope_availability/earthscope_1hz.sqlite
+  --verified-files-db FILE  SQLite DB with verified first_obs_url records for direct highrate downloads
   --skip-download           Use existing obs files only
   --force-download          Download again even if valid obs files already exist
   --no-allow-partial        Do not pass --allow-partial. Batch default is partial allowed.
@@ -41,8 +43,8 @@ Forwarded workflow options:
   -h, --help                Show this help
 
 Status behavior:
-  Rows with status OK are skipped by default. Blank, FAIL, TIMEOUT, and other statuses
-  are runnable, so the same CSV can be resumed after interruption.
+  Rows with status OK, CLASSIFIED_*, or ABANDONED_* are skipped by default.
+  Blank, FAIL, TIMEOUT, and other statuses are runnable, so the same CSV can be resumed after interruption.
   Rows whose event_id is marked with existing_data_status in --existing-db are marked
   SKIPPED_EXISTING and skipped unless --include-existing is set.
 EOF
@@ -51,6 +53,11 @@ EOF
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PIPELINE_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 WORKFLOW="${SCRIPT_DIR}/run_event_1hz_pride_workflow.sh"
+PROXY_ENV_VARS=(http_proxy https_proxy all_proxy HTTP_PROXY HTTPS_PROXY ALL_PROXY)
+
+for proxy_var in "${PROXY_ENV_VARS[@]}"; do
+  unset "${proxy_var}"
+done
 
 absolute_path() {
   realpath -m -- "$1"
@@ -65,6 +72,8 @@ MAX_STATIONS="0"
 PROCESS_JOBS="1"
 RUN_ROOT="${PIPELINE_ROOT}/runs"
 OBS_ROOT="${PIPELINE_ROOT}/data/obs"
+NORMALIZE_DB="${PIPELINE_ROOT}/data/earthscope_availability/earthscope_1hz.sqlite"
+VERIFIED_FILES_DB=""
 ALLOW_PARTIAL="1"
 RERUN_OK="0"
 EXISTING_DB=""
@@ -115,6 +124,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --obs-root)
       OBS_ROOT="$2"
+      shift 2
+      ;;
+    --normalize-db)
+      NORMALIZE_DB="$2"
+      shift 2
+      ;;
+    --verified-files-db)
+      VERIFIED_FILES_DB="$2"
       shift 2
       ;;
     --skip-download)
@@ -207,6 +224,10 @@ fi
 
 RUN_ROOT="$(absolute_path "$RUN_ROOT")"
 OBS_ROOT="$(absolute_path "$OBS_ROOT")"
+NORMALIZE_DB="$(absolute_path "$NORMALIZE_DB")"
+if [[ -n "$VERIFIED_FILES_DB" ]]; then
+  VERIFIED_FILES_DB="$(absolute_path "$VERIFIED_FILES_DB")"
+fi
 SUMMARY_FILE="$(absolute_path "$SUMMARY_FILE")"
 
 export CSV_FILE SUMMARY_FILE RUN_ROOT RERUN_OK DRY_RUN EXISTING_DB INCLUDE_EXISTING
@@ -343,7 +364,7 @@ with Path(os.environ["CSV_FILE"]).open(newline="") as handle:
     reader = csv.DictReader(handle)
     for index, row in enumerate(reader):
         status = (row.get("status") or "").strip().upper()
-        if status == "OK" and not rerun_ok:
+        if not rerun_ok and (status == "OK" or status.startswith("CLASSIFIED_") or status.startswith("ABANDONED_")):
             continue
         if status == "SKIPPED_EXISTING" and not include_existing:
             continue
@@ -502,11 +523,13 @@ while IFS=$'\t' read -r row_index event_id event_time stations; do
     --process-jobs "$PROCESS_JOBS"
     --run-root "$RUN_ROOT"
     --obs-root "$OBS_ROOT"
+    --normalize-db "$NORMALIZE_DB"
     --post-seconds "$POST_SECONDS"
   )
   if (( MAX_STATIONS > 0 )); then
     cmd+=(--max-stations "$MAX_STATIONS")
   fi
+  [[ -n "$VERIFIED_FILES_DB" ]] && cmd+=(--verified-files-db "$VERIFIED_FILES_DB")
   [[ "$SKIP_DOWNLOAD" == "1" ]] && cmd+=(--skip-download)
   [[ "$FORCE_DOWNLOAD" == "1" ]] && cmd+=(--force-download)
   [[ "$ALLOW_PARTIAL" == "1" ]] && cmd+=(--allow-partial)

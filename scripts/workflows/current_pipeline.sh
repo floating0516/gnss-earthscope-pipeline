@@ -4,7 +4,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PIPELINE_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
-DB="${PIPELINE_ROOT}/data/earthscope_availability/earthscope_1hz.sqlite"
+DB="${PIPELINE_DB:-${PIPELINE_ROOT}/data/earthscope_availability/earthscope_1hz.sqlite}"
+VERIFIED_FILES_DB="${PIPELINE_VERIFIED_FILES_DB:-}"
 METADATA_ROOT="${PIPELINE_ROOT}/data/earthscope_metadata"
 BATCH_ROOT="${PIPELINE_ROOT}/data/batches"
 OBS_ROOT="${PIPELINE_ROOT}/data/obs"
@@ -60,8 +61,15 @@ import sys
 
 db = sys.argv[1]
 conn = sqlite3.connect(db)
+tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+if "usgs_m6plus_events_usa" in tables:
+    event_table = "usgs_m6plus_events_usa"
+elif "usgs_m6plus_events_earthscope_nonconus" in tables:
+    event_table = "usgs_m6plus_events_earthscope_nonconus"
+else:
+    raise SystemExit("missing supported EarthScope event table")
 rows = conn.execute(
-    """
+    f"""
     SELECT
       e.event_id,
       e.magnitude,
@@ -71,7 +79,7 @@ rows = conn.execute(
       COALESCE(SUM(CASE WHEN c.radius_km = 300 THEN 1 ELSE 0 END), 0) AS stations_300km,
       COALESCE(e.existing_data_status, '') AS existing_data_status,
       COALESCE(e.existing_station_count, 0) AS existing_station_count
-    FROM usgs_m6plus_events_usa e
+    FROM {event_table} e
     LEFT JOIN event_earthscope_station_candidates c
       ON c.event_id = e.event_id
      AND c.radius_km IN (200, 300)
@@ -138,16 +146,23 @@ import sys
 
 db, event_id, radius_km, output, include_existing = sys.argv[1:6]
 conn = sqlite3.connect(db)
+tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+if "usgs_m6plus_events_usa" in tables:
+    event_table = "usgs_m6plus_events_usa"
+elif "usgs_m6plus_events_earthscope_nonconus" in tables:
+    event_table = "usgs_m6plus_events_earthscope_nonconus"
+else:
+    raise SystemExit("missing supported EarthScope event table")
 event = conn.execute(
-    """
+    f"""
     SELECT event_id, time_utc, COALESCE(existing_data_status, '')
-    FROM usgs_m6plus_events_usa
+    FROM {event_table}
     WHERE event_id = ?
     """,
     (event_id,),
 ).fetchone()
 if event is None:
-    raise SystemExit(f"event not found in usgs_m6plus_events_usa: {event_id}")
+    raise SystemExit(f"event not found in {event_table}: {event_id}")
 if event[2] and include_existing != "1":
     raise SystemExit(
         f"event already has normalized data ({event[2]}): {event_id}; "
@@ -187,12 +202,18 @@ PY
 }
 
 cmd_run_batch() {
+  local cmd=(
+    "${PIPELINE_ROOT}/scripts/workflows/run_event_batch_workflow.sh"
+    --run-root "${RUN_ROOT}"
+    --obs-root "${OBS_ROOT}"
+    --existing-db "${DB}"
+    --normalize-db "${DB}"
+  )
   mkdir -p "${OBS_ROOT}" "${RUN_ROOT}" "${BATCH_ROOT}"
-  "${PIPELINE_ROOT}/scripts/workflows/run_event_batch_workflow.sh" \
-    --run-root "${RUN_ROOT}" \
-    --obs-root "${OBS_ROOT}" \
-    --existing-db "${DB}" \
-    "$@"
+  if [[ -n "${VERIFIED_FILES_DB}" ]]; then
+    cmd+=(--verified-files-db "${VERIFIED_FILES_DB}")
+  fi
+  "${cmd[@]}" "$@"
 }
 
 cmd_update_availability() {

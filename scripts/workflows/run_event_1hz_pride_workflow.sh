@@ -24,6 +24,8 @@ Options:
   --process-jobs N          Number of station PRIDE jobs to run concurrently. Default: 1
   --run-root DIR            Workflow run root. Default: ./runs
   --obs-root DIR            Canonical obs root. Default: ./data/obs
+  --normalize-db FILE       SQLite DB for normalization station coordinates. Default: data/earthscope_availability/earthscope_1hz.sqlite
+  --verified-files-db FILE  SQLite DB with verified first_obs_url records for direct highrate downloads
   --skip-download           Use existing obs files only
   --force-download          Download again even if valid obs files already exist
   --allow-partial           Continue PRIDE with available stations when some obs files fail validation
@@ -56,6 +58,11 @@ PRIDE_PROCESSOR="${PIPELINE_ROOT}/tools/pride_processor/process_event_window.sh"
 PRIDE_CLEANER="${PIPELINE_ROOT}/tools/pride_processor/cleanup_pride_workdir.sh"
 QUALITY_SCRIPT="${PIPELINE_ROOT}/scripts/quality/compute_kin_quality.py"
 NORMALIZER="${PIPELINE_ROOT}/scripts/normalize/normalize_pride_kin_event.py"
+PROXY_ENV_VARS=(http_proxy https_proxy all_proxy HTTP_PROXY HTTPS_PROXY ALL_PROXY)
+
+for proxy_var in "${PROXY_ENV_VARS[@]}"; do
+  unset "${proxy_var}"
+done
 
 absolute_path() {
   realpath -m -- "$1"
@@ -71,6 +78,8 @@ MAX_STATIONS="0"
 PROCESS_JOBS="1"
 RUN_ROOT="${PIPELINE_ROOT}/runs"
 OBS_ROOT="${PIPELINE_ROOT}/data/obs"
+NORMALIZE_DB="${PIPELINE_ROOT}/data/earthscope_availability/earthscope_1hz.sqlite"
+VERIFIED_FILES_DB=""
 STATIONS_FILE=""
 SKIP_DOWNLOAD="0"
 FORCE_DOWNLOAD="0"
@@ -151,6 +160,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --obs-root)
       OBS_ROOT="$2"
+      shift 2
+      ;;
+    --normalize-db)
+      NORMALIZE_DB="$2"
+      shift 2
+      ;;
+    --verified-files-db)
+      VERIFIED_FILES_DB="$2"
       shift 2
       ;;
     --stations-file)
@@ -247,6 +264,10 @@ fi
 
 RUN_ROOT="$(absolute_path "$RUN_ROOT")"
 OBS_ROOT="$(absolute_path "$OBS_ROOT")"
+NORMALIZE_DB="$(absolute_path "$NORMALIZE_DB")"
+if [[ -n "$VERIFIED_FILES_DB" ]]; then
+  VERIFIED_FILES_DB="$(absolute_path "$VERIFIED_FILES_DB")"
+fi
 if [[ -n "$STATIONS_FILE" ]]; then
   STATIONS_FILE="$(absolute_path "$STATIONS_FILE")"
 fi
@@ -325,6 +346,9 @@ if [[ "$DRY_RUN" == "1" ]]; then
     if [[ -n "$STATIONS_FILE" ]]; then
       printf ' --stations-file %q' "$STATIONS_FILE"
     fi
+    if [[ -n "$VERIFIED_FILES_DB" ]]; then
+      printf ' --verified-files-db %q' "$VERIFIED_FILES_DB"
+    fi
     for station in "${STATIONS[@]}"; do
       printf ' %q' "$station"
     done
@@ -348,7 +372,7 @@ if [[ "$DRY_RUN" == "1" ]]; then
   printf '  python3 %q --event-time %q --expected-hours-each-side %q --out-tsv %q --out-json %q %s\n' \
     "$QUALITY_SCRIPT" "$EVENT_TIME_UTC" "$HOURS" "${REPORT_DIR}/kin-quality.tsv" "${REPORT_DIR}/kin-quality.json" '<kin-files-from-manifest>'
   printf '  python3 %q --workflow-summary %q --quality-json %q --db %q --normalized-root %q --include-warn\n' \
-    "$NORMALIZER" "${REPORT_DIR}/workflow-summary.json" "${REPORT_DIR}/kin-quality.json" "${PIPELINE_ROOT}/data/earthscope_availability/earthscope_1hz.sqlite" "${PIPELINE_ROOT}/exports/normalized-ok-stations-us-nz"
+    "$NORMALIZER" "${REPORT_DIR}/workflow-summary.json" "${REPORT_DIR}/kin-quality.json" "$NORMALIZE_DB" "${PIPELINE_ROOT}/exports/normalized-ok-stations-us-nz"
   if [[ "$SKIP_PLOT" == "0" ]]; then
     printf '  final normalized figures from %q after normalization\n' "${PIPELINE_ROOT}/scripts/plotting/plot_completed_normalized_event.py"
   fi
@@ -451,6 +475,9 @@ if [[ "$SKIP_DOWNLOAD" == "0" ]]; then
   )
   if [[ -n "$STATIONS_FILE" ]]; then
     download_cmd+=(--stations-file "$STATIONS_FILE")
+  fi
+  if [[ -n "$VERIFIED_FILES_DB" ]]; then
+    download_cmd+=(--verified-files-db "$VERIFIED_FILES_DB")
   fi
   download_cmd+=("${STATIONS[@]}")
 
@@ -754,7 +781,7 @@ else
   if python3 "$NORMALIZER" \
       --workflow-summary "$WORKFLOW_JSON" \
       --quality-json "$KIN_QUALITY_JSON" \
-      --db "${PIPELINE_ROOT}/data/earthscope_availability/earthscope_1hz.sqlite" \
+      --db "$NORMALIZE_DB" \
       --normalized-root "$FINAL_NORMALIZED_ROOT" \
       --include-warn \
       > "$NORMALIZE_RESULT" 2> "${LOG_DIR}/normalize-pride-kin.log"; then

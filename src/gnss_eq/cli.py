@@ -43,12 +43,22 @@ def shlex_quote(value: str) -> str:
     return shlex.quote(value)
 
 
+def positive_int(value: str) -> int:
+    parsed = int(value)
+    if parsed < 1:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return parsed
+
+
 def add_common_workflow_flags(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--hours", default="3")
     parser.add_argument("--interval", default="1")
     parser.add_argument("--max-stations", default="0")
+    parser.add_argument("--process-jobs", type=positive_int, default=1)
     parser.add_argument("--run-root", default=str(ROOT / "runs"))
     parser.add_argument("--obs-root", default=str(ROOT / "data" / "obs"))
+    parser.add_argument("--normalize-db", default=str(DEFAULT_AVAILABILITY_DB))
+    parser.add_argument("--verified-files-db", default="")
     parser.add_argument("--skip-download", action="store_true")
     parser.add_argument("--force-download", action="store_true")
     parser.add_argument("--skip-process", action="store_true")
@@ -63,6 +73,7 @@ def add_common_workflow_flags(parser: argparse.ArgumentParser) -> None:
 def cmd_run_event(args: argparse.Namespace) -> int:
     run_root = absolute_path(args.run_root)
     obs_root = absolute_path(args.obs_root)
+    normalize_db = absolute_path(args.normalize_db)
     cmd = [
         str(SCRIPTS / "workflows" / "run_event_1hz_pride_workflow.sh"),
         "--event-id",
@@ -77,8 +88,12 @@ def cmd_run_event(args: argparse.Namespace) -> int:
         run_root,
         "--obs-root",
         obs_root,
+        "--normalize-db",
+        normalize_db,
         "--post-seconds",
         args.post_seconds,
+        "--process-jobs",
+        str(args.process_jobs),
     ]
     if args.stations:
         cmd.extend(["--stations", args.stations])
@@ -86,6 +101,8 @@ def cmd_run_event(args: argparse.Namespace) -> int:
         cmd.extend(["--stations-file", args.stations_file])
     if int(args.max_stations) > 0:
         cmd.extend(["--max-stations", args.max_stations])
+    if args.verified_files_db:
+        cmd.extend(["--verified-files-db", absolute_path(args.verified_files_db)])
     for flag, enabled in [
         ("--skip-download", args.skip_download),
         ("--force-download", args.force_download),
@@ -105,6 +122,7 @@ def cmd_run_event(args: argparse.Namespace) -> int:
 def cmd_run_batch(args: argparse.Namespace) -> int:
     run_root = absolute_path(args.run_root)
     obs_root = absolute_path(args.obs_root)
+    normalize_db = absolute_path(args.normalize_db)
     csv_path = args.csv
     if csv_path == "-":
         state_csv = Path(args.state_csv) if args.state_csv else ROOT / "data" / "batches" / f"stdin-batch-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.csv"
@@ -127,13 +145,19 @@ def cmd_run_batch(args: argparse.Namespace) -> int:
         run_root,
         "--obs-root",
         obs_root,
+        "--normalize-db",
+        normalize_db,
         "--post-seconds",
         args.post_seconds,
+        "--process-jobs",
+        str(args.process_jobs),
     ]
     if args.summary:
         cmd.extend(["--summary", args.summary])
     if int(args.max_stations) > 0:
         cmd.extend(["--max-stations", args.max_stations])
+    if args.verified_files_db:
+        cmd.extend(["--verified-files-db", absolute_path(args.verified_files_db)])
     for flag, enabled in [
         ("--skip-download", args.skip_download),
         ("--force-download", args.force_download),

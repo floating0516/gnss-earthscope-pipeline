@@ -67,15 +67,29 @@ def connect_db(path: Path) -> sqlite3.Connection:
     return conn
 
 
+def existing_table(conn: sqlite3.Connection, names: list[str]) -> str | None:
+    for name in names:
+        row = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
+            (name,),
+        ).fetchone()
+        if row:
+            return name
+    return None
+
+
 def read_event(conn: sqlite3.Connection, event_id: str, fallback_time: str) -> dict:
-    row = conn.execute(
-        """
-        SELECT event_id, title, time_utc, event_date, magnitude, longitude, latitude, depth_km, place, usgs_url
-        FROM usgs_m6plus_events_usa
-        WHERE event_id = ?
-        """,
-        (event_id,),
-    ).fetchone()
+    event_table = existing_table(conn, ["usgs_m6plus_events_usa", "usgs_m6plus_events_earthscope_nonconus"])
+    row = None
+    if event_table:
+        row = conn.execute(
+            f"""
+            SELECT event_id, title, time_utc, event_date, magnitude, longitude, latitude, depth_km, place, usgs_url
+            FROM {event_table}
+            WHERE event_id = ?
+            """,
+            (event_id,),
+        ).fetchone()
     if row:
         return dict(row)
     return {
@@ -202,7 +216,14 @@ def sampling_hz(series: list[tuple]) -> float:
     return round(1.0 / median_interval, 6) if median_interval > 0 else 1.0
 
 
-def event_json(event: dict, station_count: int, workflow_summary: Path, grade: dict[str, object], include_warn: bool) -> dict:
+def event_json(
+    event: dict,
+    station_count: int,
+    workflow_summary: Path,
+    grade: dict[str, object],
+    include_warn: bool,
+    skipped_stations: list[dict[str, str]] | None = None,
+) -> dict:
     title = event.get("title") or event.get("place") or event.get("event_id")
     metadata = normalization_metadata(include_warn)
     return {
@@ -236,6 +257,7 @@ def event_json(event: dict, station_count: int, workflow_summary: Path, grade: d
         "azimuth_bin_count": grade["azimuth_bin_count"],
         "single_station_allowed": True,
         "normalization": metadata,
+        "skipped_stations": skipped_stations or [],
     }
 
 
@@ -271,6 +293,7 @@ def write_outputs(args: argparse.Namespace, summary: dict, quality: dict) -> dic
     output_dir.mkdir(parents=True, exist_ok=True)
 
     station_rows = []
+    skipped_stations: list[dict[str, str]] = []
     waveform_rows = 0
     waveforms_path = output_dir / "waveforms.csv.gz"
     with gzip.open(waveforms_path, "wt", newline="") as handle:
@@ -282,7 +305,8 @@ def write_outputs(args: argparse.Namespace, summary: dict, quality: dict) -> dic
         writer.writeheader()
         for station, kin_file in selected:
             if station not in metadata:
-                raise SystemExit(f"Missing coordinates for station {station} in {args.db}")
+                skipped_stations.append({"station": station, "reason": "missing_coordinates"})
+                continue
             series = kin_to_enu(kin_file, event_time)
             if not series:
                 continue
@@ -340,7 +364,7 @@ def write_outputs(args: argparse.Namespace, summary: dict, quality: dict) -> dic
         writer.writerows(sorted(station_rows, key=lambda row: row["Station"]))
 
     grade = event_grade(station_rows)
-    event_payload = event_json(event, len(station_rows), args.workflow_summary, grade, args.include_warn)
+    event_payload = event_json(event, len(station_rows), args.workflow_summary, grade, args.include_warn, skipped_stations)
     (output_dir / "event.json").write_text(json.dumps(event_payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
     provenance = {
@@ -359,6 +383,7 @@ def write_outputs(args: argparse.Namespace, summary: dict, quality: dict) -> dic
         "normalization": normalization_metadata(args.include_warn),
         "quality_summary": quality.get("summary", {}),
         "station_quality_counts": dict(Counter(row["Quality_Status"] for row in station_rows)),
+        "skipped_stations": skipped_stations,
         "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
     }
     (output_dir / "provenance.json").write_text(json.dumps(provenance, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
@@ -370,6 +395,7 @@ def write_outputs(args: argparse.Namespace, summary: dict, quality: dict) -> dic
         "normalized_waveform_rows": waveform_rows,
         "event_grade": grade["grade"],
         "azimuth_bins_covered": grade["azimuth_bins_covered"],
+        "skipped_stations": skipped_stations,
     }
 
 

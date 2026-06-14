@@ -167,7 +167,7 @@ earthscope.overview(view="coverage", source="earthscope", include_env=true)
 
 ## 5. 数据源
 
-`overview` 支持三个数据源：
+`overview` 支持三个主要数据源：
 
 ```text
 source="earthscope"
@@ -175,7 +175,7 @@ source="geonet"
 source="paper"
 ```
 
-### 5.1 EarthScope / 美国数据源
+### 5.1 EarthScope / GAGE 数据源
 
 默认数据源：
 
@@ -183,15 +183,20 @@ source="paper"
 source="earthscope"
 ```
 
+`earthscope` 是统一的 EarthScope/GAGE 数据源，覆盖美国区域和可由 EarthScope/GAGE 台站处理的美国周边区域。用户通常不需要区分美国本土和 non-CONUS；MCP 会根据 `event_id` 自动选择底层数据库。
+
 主要读取：
 
 ```text
 data/earthscope_availability/earthscope_1hz.sqlite
+data/earthscope_availability/earthscope_nonconus_1hz.sqlite
 scripts/workflows/current_pipeline.sh list-events
 runs/<event-id>/workflow-*
 ```
 
-用于查看美国 EarthScope 候选事件、已有 workflow 输出和历史 normalized 标签。
+用于查看 EarthScope 候选事件、已有 workflow 输出和历史 normalized 标签。
+
+兼容说明：`source="earthscope_nonconus"` 仍可用于旧调用，但它只是限制查询 non-CONUS 底层库的兼容别名；新调用推荐统一使用 `source="earthscope"`。
 
 ### 5.2 GeoNet / 新西兰数据源
 
@@ -240,7 +245,7 @@ view         coverage/events/summary/stations，默认 coverage
 event_id     可选；stations 视图必填
 limit        返回条数上限，默认 50
 include_env  是否附带 gnss-eq check-env，默认 false
-source       earthscope/geonet/paper，默认 earthscope
+source       earthscope/geonet/paper，默认 earthscope；earthscope_nonconus 仅作为兼容别名
 ```
 
 ### 6.1 `view="coverage"`
@@ -308,6 +313,7 @@ EarthScope 示例：
 
 ```text
 earthscope.overview(view="stations", source="earthscope", event_id="nc73666231", limit=100)
+earthscope.overview(view="stations", source="earthscope", event_id="us7000irjd", limit=50)
 ```
 
 GeoNet 示例：
@@ -340,6 +346,7 @@ event_id          事件 ID
 mode              preview 或 export，默认 preview
 radius_km         200 或 300，默认 200
 include_existing  是否允许已有 HAS_NORMALIZED 的事件导出，默认 false
+source            earthscope，默认 earthscope；earthscope_nonconus 仅作为兼容别名
 ```
 
 ### 7.1 Preview
@@ -348,6 +355,7 @@ include_existing  是否允许已有 HAS_NORMALIZED 的事件导出，默认 fal
 
 ```text
 earthscope.batch(event_id="nc73666231", mode="preview", radius_km=200)
+earthscope.batch(event_id="us7000irjd", mode="preview", radius_km=300, source="earthscope")
 ```
 
 返回内容包括：
@@ -366,6 +374,7 @@ would_export
 
 ```text
 earthscope.batch(event_id="nc73666231", mode="export", radius_km=200)
+earthscope.batch(event_id="us7000irjd", mode="export", radius_km=300, source="earthscope")
 ```
 
 生成：
@@ -389,15 +398,33 @@ earthscope.batch(event_id="ci38457511", mode="export", radius_km=200, include_ex
 ```text
 csv                    batch CSV 路径，必须在 data/batches/ 下
 timeout                超时时间，默认 3600 秒
+process_jobs           每个事件内并行运行的 station PRIDE jobs 数，默认 1；大事件建议从 5 开始
 cleanup_pride_workdir  成功后清理 PRIDE 中间文件
 cleanup_obs            成功后清理 canonical obs 文件
 rerun_ok               是否重跑 batch 中已标记 OK 的行
+source                 workflow 使用的数据源/坐标库，默认 earthscope；MCP 会按 batch 内 event_id 自动选择 EarthScope 底层 DB
+use_verified_files     是否优先使用 verified first_obs_url 直接下载；默认 false，保持原 product API 路径
 ```
 
 示例：
 
 ```text
 earthscope.run_batch(csv="data/batches/nc73666231-200km.csv", timeout=3600)
+```
+
+大事件需要加快站点级 PRIDE 处理时，可以保持事件串行、只并行当前事件内的 station jobs：
+
+```text
+earthscope.run_batch(
+    csv="data/batches/nonconus-priority8-300km.csv",
+    timeout=10800,
+    process_jobs=5,
+    cleanup_pride_workdir=true,
+    cleanup_obs=true,
+    rerun_ok=true,
+    source="earthscope",
+    use_verified_files=true,
+)
 ```
 
 输出目录：
