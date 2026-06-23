@@ -47,6 +47,7 @@ scripts/*
 !scripts/quality/
 !scripts/plotting/
 !scripts/cli/
+!scripts/pgd_magnitude/
 !scripts/workflows/*
 !scripts/database/*
 !scripts/availability/*
@@ -54,6 +55,7 @@ scripts/*
 !scripts/quality/*
 !scripts/plotting/*
 !scripts/cli/*
+!scripts/pgd_magnitude/*
 tools/earthscope_downloader/
 tools/geonet_downloader/
 tools/renag_downloader/
