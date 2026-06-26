@@ -77,18 +77,20 @@ rows = conn.execute(
       COALESCE(e.place, ''),
       COALESCE(SUM(CASE WHEN c.radius_km = 200 THEN 1 ELSE 0 END), 0) AS stations_200km,
       COALESCE(SUM(CASE WHEN c.radius_km = 300 THEN 1 ELSE 0 END), 0) AS stations_300km,
+      COALESCE(SUM(CASE WHEN c.radius_km = 500 THEN 1 ELSE 0 END), 0) AS stations_500km,
+      COALESCE(SUM(CASE WHEN c.radius_km = 1000 THEN 1 ELSE 0 END), 0) AS stations_1000km,
       COALESCE(e.existing_data_status, '') AS existing_data_status,
       COALESCE(e.existing_station_count, 0) AS existing_station_count
     FROM {event_table} e
     LEFT JOIN event_earthscope_station_candidates c
       ON c.event_id = e.event_id
-     AND c.radius_km IN (200, 300)
+     AND c.radius_km IN (200, 300, 500, 1000)
     GROUP BY e.event_id
     ORDER BY e.magnitude DESC, e.event_date DESC
     """
 ).fetchall()
 
-print("event_id\tmagnitude\tevent_date\tplace\tstations_200km\tstations_300km\texisting_data_status\texisting_station_count")
+print("event_id\tmagnitude\tevent_date\tplace\tstations_200km\tstations_300km\tstations_500km\tstations_1000km\texisting_data_status\texisting_station_count")
 for row in rows:
     print("\t".join(str(value) for value in row))
 PY
@@ -209,6 +211,14 @@ cmd_run_batch() {
     --existing-db "${DB}"
     --normalize-db "${DB}"
   )
+  local preflight_cmd=(
+    python3 -m gnss_eq.cli preflight-earthscope
+    --db "${DB}"
+  )
+  if [[ -n "${VERIFIED_FILES_DB}" ]]; then
+    preflight_cmd+=(--verified-files-db "${VERIFIED_FILES_DB}")
+  fi
+  PYTHONPATH="${PIPELINE_ROOT}/src${PYTHONPATH:+:${PYTHONPATH}}" "${preflight_cmd[@]}"
   mkdir -p "${OBS_ROOT}" "${RUN_ROOT}" "${BATCH_ROOT}"
   if [[ -n "${VERIFIED_FILES_DB}" ]]; then
     cmd+=(--verified-files-db "${VERIFIED_FILES_DB}")

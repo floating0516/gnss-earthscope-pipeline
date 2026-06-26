@@ -13,6 +13,8 @@ from pathlib import Path
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
+from gnss_eq import preflight
+
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS = ROOT / "scripts"
@@ -311,10 +313,11 @@ def earthscope_token() -> str:
 
 def check_earthscope_auth() -> tuple[str, str]:
     login_hint = "run: es login"
-    if shutil.which("es") is None:
+    env = preflight.effective_env(strip_proxy=False)
+    if shutil.which("es", path=env.get("PATH")) is None:
         return "MISSING", f"es command not found; {login_hint} after installing EarthScope CLI"
     try:
-        result = subprocess.run(["es", "user", "get-access-token"], text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
+        result = subprocess.run(["es", "user", "get-access-token"], text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30, env=env)
     except subprocess.TimeoutExpired:
         return "FAIL", f"token check timed out; {login_hint}"
     if result.returncode != 0:
@@ -582,34 +585,37 @@ def cmd_search_events(args: argparse.Namespace) -> int:
 
 
 def cmd_check_env(_: argparse.Namespace) -> int:
-    checks = [
-        ("bash", shutil.which("bash")),
-        ("python3", shutil.which("python3")),
-        ("timeout", shutil.which("timeout")),
-        ("pdp3", shutil.which("pdp3")),
-        ("run-event script", str(SCRIPTS / "workflows" / "run_event_1hz_pride_workflow.sh") if (SCRIPTS / "workflows" / "run_event_1hz_pride_workflow.sh").exists() else None),
-        ("run-batch script", str(SCRIPTS / "workflows" / "run_event_batch_workflow.sh") if (SCRIPTS / "workflows" / "run_event_batch_workflow.sh").exists() else None),
-        ("downloader script", str(DOWNLOADER_TOOLS / "download_earthscope_default.sh") if (DOWNLOADER_TOOLS / "download_earthscope_default.sh").exists() else None),
-        ("PRIDE processor script", str(PRIDE_TOOLS / "process_event_window.sh") if (PRIDE_TOOLS / "process_event_window.sh").exists() else None),
-        ("ENU plot script", str(PRIDE_TOOLS / "plot_enu_svg.py") if (PRIDE_TOOLS / "plot_enu_svg.py").exists() else None),
-        ("select-stations script", str(DOWNLOADER_TOOLS / "select_stations_by_radius.py") if (DOWNLOADER_TOOLS / "select_stations_by_radius.py").exists() else None),
-    ]
+    env = preflight.effective_env(strip_proxy=False)
+    checks = preflight.command_checks(env)
+    checks.extend(preflight.script_checks())
     failed = False
-    for name, value in checks:
-        status = "OK" if value else "MISSING"
-        print(f"{status}\t{name}\t{value or ''}")
-        if not value and name in {"bash", "python3", "timeout", "run-event script", "run-batch script"}:
+    for result in checks:
+        print(f"{result.status}\t{result.name}\t{result.detail}")
+        if result.failed:
             failed = True
     auth_status, auth_detail = check_earthscope_auth()
     print(f"{auth_status}\tEarthScope auth\t{auth_detail}")
     if auth_status != "OK":
         failed = True
 
-    pride_bin = os.environ.get("PRIDE_BIN_DIR")
-    earthscope_bin = os.environ.get("EARTHSCOPE_ENV_BIN")
-    print(f"INFO\tPRIDE_BIN_DIR\t{pride_bin or '(not set)'}")
-    print(f"INFO\tEARTHSCOPE_ENV_BIN\t{earthscope_bin or '(not set)'}")
+    for key in ("PRIDE_BIN_DIR", "EARTHSCOPE_ENV_BIN", "LOCAL_BIN_DIR"):
+        print(f"INFO\t{key}\t{os.environ.get(key) or '(not set)'}")
     return 1 if failed else 0
+
+
+def cmd_preflight_earthscope(args: argparse.Namespace) -> int:
+    results, exit_code = preflight.run_preflight(
+        db=args.db,
+        verified_files_db=args.verified_files_db or None,
+        timeout=args.timeout,
+        include_connectivity=not args.no_connectivity,
+        include_database=not args.no_database,
+    )
+    if args.format == "json":
+        preflight.write_json(results, exit_code)
+    else:
+        preflight.write_tsv(results)
+    return exit_code
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -725,6 +731,15 @@ def build_parser() -> argparse.ArgumentParser:
     search.add_argument("--output", help="Write output file. Use --format csv for pipeline-friendly event tables.")
     search.set_defaults(func=cmd_search_events)
 
+    preflight_cmd = sub.add_parser("preflight-earthscope", help="Run blocking EarthScope workflow readiness checks.")
+    preflight_cmd.add_argument("--db", default=str(DEFAULT_AVAILABILITY_DB), help="Availability database path.")
+    preflight_cmd.add_argument("--verified-files-db", default="", help="Optional verified-files database path.")
+    preflight_cmd.add_argument("--timeout", type=float, default=30.0, help="Per-check timeout in seconds.")
+    preflight_cmd.add_argument("--format", choices=["tsv", "json"], default="tsv")
+    preflight_cmd.add_argument("--no-connectivity", action="store_true", help="Skip authenticated EarthScope curl connectivity check.")
+    preflight_cmd.add_argument("--no-database", action="store_true", help="Skip database path checks.")
+    preflight_cmd.set_defaults(func=cmd_preflight_earthscope)
+
     check = sub.add_parser("check-env", help="Check local runtime dependencies.")
     check.set_defaults(func=cmd_check_env)
     return parser
@@ -734,3 +749,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     return args.func(args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -39,6 +39,27 @@ def metadata_file_for_event(metadata_root: Path, year: int, doy: int) -> Path:
     return metadata_root / str(year) / f"earthscope-metadata-{year}-{doy:03d}-le1.json"
 
 
+def metadata_date(path: Path) -> dt.date | None:
+    parts = path.stem.split("-")
+    if len(parts) != 5:
+        return None
+    try:
+        return dt.datetime.strptime(f"{parts[2]}-{parts[3]}", "%Y-%j").date()
+    except ValueError:
+        return None
+
+
+def metadata_files_for_event(metadata_root: Path, year: int, doy: int) -> list[Path]:
+    event_date = dt.datetime.strptime(f"{year}-{doy:03d}", "%Y-%j").date()
+    files = []
+    for path in metadata_root.glob("*/earthscope-metadata-*-le1.json"):
+        date = metadata_date(path)
+        if date is not None and date <= event_date:
+            files.append((date, path))
+    files.sort(reverse=True)
+    return [path for _, path in files]
+
+
 def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     radius = 6371.0088
     phi1 = math.radians(lat1)
@@ -74,10 +95,20 @@ def init_candidate_table(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_event_candidates_radius ON event_earthscope_station_candidates(radius_km)")
 
 
+def event_table(conn: sqlite3.Connection) -> str:
+    tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+    if "usgs_m6plus_events_usa" in tables:
+        return "usgs_m6plus_events_usa"
+    if "usgs_m6plus_events_earthscope_nonconus" in tables:
+        return "usgs_m6plus_events_earthscope_nonconus"
+    raise SystemExit("missing supported EarthScope event table")
+
+
 def read_events(conn: sqlite3.Connection, event_ids: list[str] | None) -> list[sqlite3.Row]:
-    sql = """
+    table = event_table(conn)
+    sql = f"""
         SELECT event_id, event_date, year, latitude, longitude
-        FROM usgs_m6plus_events_usa
+        FROM {table}
     """
     params: list[str] = []
     if event_ids:
@@ -103,39 +134,40 @@ def read_day_availability(conn: sqlite3.Connection, event_date: str) -> set[str]
     }
 
 
-def read_metadata_stations(metadata_file: Path, available: set[str]) -> dict[str, dict[str, object]]:
-    payload = json.loads(metadata_file.read_text())
+def read_metadata_stations(metadata_files: list[Path], available: set[str]) -> dict[str, dict[str, object]]:
     stations: dict[str, dict[str, object]] = {}
-    for feature in payload.get("features", []):
-        props = feature.get("properties", {})
-        station = str(props.get("site_code") or "").strip().upper()
-        if not station or station not in available:
-            continue
-        try:
-            sample_interval = float(props.get("sample_interval"))
-        except (TypeError, ValueError):
-            continue
-        if sample_interval > 1.0:
-            continue
-        coords = feature.get("geometry", {}).get("coordinates") or []
-        if len(coords) < 2:
-            continue
-        try:
-            lon = float(coords[0])
-            lat = float(coords[1])
-        except (TypeError, ValueError):
-            continue
-        existing = stations.get(station)
-        if existing is not None and sample_interval >= float(existing["sample_interval"]):
-            continue
-        stations[station] = {
-            "station": station,
-            "latitude": lat,
-            "longitude": lon,
-            "site_id": str(props.get("site_id") or ""),
-            "sample_interval": sample_interval,
-            "data_type": str(props.get("data_type") or ""),
-        }
+    for metadata_file in metadata_files:
+        payload = json.loads(metadata_file.read_text())
+        for feature in payload.get("features", []):
+            props = feature.get("properties", {})
+            station = str(props.get("site_code") or "").strip().upper()
+            if not station or station not in available or station in stations:
+                continue
+            try:
+                sample_interval = float(props.get("sample_interval"))
+            except (TypeError, ValueError):
+                continue
+            if sample_interval > 1.0:
+                continue
+            coords = feature.get("geometry", {}).get("coordinates") or []
+            if len(coords) < 2:
+                continue
+            try:
+                lon = float(coords[0])
+                lat = float(coords[1])
+            except (TypeError, ValueError):
+                continue
+            stations[station] = {
+                "station": station,
+                "latitude": lat,
+                "longitude": lon,
+                "site_id": str(props.get("site_id") or ""),
+                "sample_interval": sample_interval,
+                "data_type": str(props.get("data_type") or ""),
+                "metadata_file": str(metadata_file),
+            }
+        if available.issubset(stations):
+            break
     return stations
 
 
@@ -159,17 +191,17 @@ def rebuild(conn: sqlite3.Connection, metadata_root: Path, radii: list[float], e
         event_date = str(event["event_date"])
         year = int(event["year"])
         doy = doy_from_date(event_date)
-        metadata_file = metadata_file_for_event(metadata_root, year, doy)
-        if not metadata_file.exists():
+        metadata_files = metadata_files_for_event(metadata_root, year, doy)
+        if not metadata_files:
             missing_metadata += 1
-            print(f"MISSING_METADATA\t{event_id}\t{event_date}\t{metadata_file}")
+            print(f"MISSING_METADATA\t{event_id}\t{event_date}\t{metadata_file_for_event(metadata_root, year, doy)}")
             continue
         available = read_day_availability(conn, event_date)
         if not available:
             no_availability += 1
             print(f"NO_AVAILABILITY\t{event_id}\t{event_date}")
             continue
-        stations = read_metadata_stations(metadata_file, available)
+        stations = read_metadata_stations(metadata_files, available)
         rows = []
         for station in stations.values():
             distance = haversine_km(
@@ -193,7 +225,7 @@ def rebuild(conn: sqlite3.Connection, metadata_root: Path, radii: list[float], e
                             station["sample_interval"],
                             station["data_type"],
                             SOURCE,
-                            str(metadata_file),
+                            str(station["metadata_file"]),
                             updated_at,
                         )
                     )

@@ -6,7 +6,7 @@ import unittest
 from contextlib import redirect_stdout
 from unittest.mock import Mock, patch
 
-from gnss_eq import cli
+from gnss_eq import cli, preflight
 
 
 class CompletedToken:
@@ -81,8 +81,10 @@ class CliCheckEnvTest(unittest.TestCase):
         self.assertEqual(detail, "login required; run: es login")
 
     def test_check_env_includes_earthscope_auth(self):
-        with patch.object(cli.shutil, "which", return_value="/usr/bin/tool"):
-            with patch.object(cli.Path, "exists", return_value=True):
+        ok_checks = [preflight.CheckResult("OK", f"command {command}", f"/usr/bin/{command}") for command in preflight.REQUIRED_COMMANDS]
+        ok_checks.extend(preflight.CheckResult("OK", name, str(path)) for name, path in preflight.REQUIRED_SCRIPTS)
+        with patch.object(preflight, "command_checks", return_value=ok_checks[: len(preflight.REQUIRED_COMMANDS)]):
+            with patch.object(preflight, "script_checks", return_value=ok_checks[len(preflight.REQUIRED_COMMANDS) :]):
                 with patch.object(cli, "check_earthscope_auth", return_value=("OK", "access token available")):
                     output = io.StringIO()
                     with redirect_stdout(output):
@@ -90,6 +92,18 @@ class CliCheckEnvTest(unittest.TestCase):
 
         self.assertEqual(rc, 0)
         self.assertIn("OK\tEarthScope auth\taccess token available", output.getvalue())
+        self.assertIn("OK\tcommand CRX2RNX\t/usr/bin/CRX2RNX", output.getvalue())
+
+    def test_preflight_command_returns_report(self):
+        results = [preflight.CheckResult("PREFLIGHT_OK", "EarthScope preflight", "all blocking checks passed", fatal=False)]
+        args = Mock(db="db.sqlite", verified_files_db="", timeout=1.0, no_connectivity=False, no_database=False, format="tsv")
+        with patch.object(preflight, "run_preflight", return_value=(results, 0)):
+            output = io.StringIO()
+            with redirect_stdout(output):
+                rc = cli.cmd_preflight_earthscope(args)
+
+        self.assertEqual(rc, 0)
+        self.assertIn("PREFLIGHT_OK\tEarthScope preflight\tall blocking checks passed", output.getvalue())
 
 
 if __name__ == "__main__":

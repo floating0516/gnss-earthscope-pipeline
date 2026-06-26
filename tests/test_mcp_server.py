@@ -62,6 +62,12 @@ class LongOutput:
     stderr = ""
 
 
+class PreflightFailure:
+    returncode = 2
+    stdout = "FAIL\tEarthScope auth\tlogin required; run: es login\nPREFLIGHT_FAILED\tEarthScope preflight\t1 blocking check(s); batch not started\n"
+    stderr = ""
+
+
 def create_earthscope_db(path: Path, event_table: str = "usgs_m6plus_events_usa") -> None:
     conn = sqlite3.connect(path)
     conn.execute(
@@ -279,7 +285,7 @@ class McpServerTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             mcp_server.export_batch("bad/event")
         with self.assertRaises(ValueError):
-            mcp_server.export_batch("ci38457511", radius_km=250)
+            mcp_server.export_batch("ci38457511", radius_km=750)
 
     def test_run_batch_limits_csv_to_batch_root(self):
         with self.assertRaises(ValueError):
@@ -315,6 +321,17 @@ class McpServerTest(unittest.TestCase):
         run_env = run.call_args.kwargs["env"]
         self.assertNotIn("http_proxy", run_env)
         self.assertNotIn("HTTPS_PROXY", run_env)
+
+    def test_run_batch_marks_preflight_failure(self):
+        csv_path = Path("data/batches/example.csv")
+        with patch.object(mcp_server.subprocess, "run", return_value=PreflightFailure):
+            result = mcp_server.run_batch(str(csv_path), source="earthscope_nonconus")
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["returncode"], 2)
+        self.assertEqual(result["error_code"], "EARTHSCOPE_PREFLIGHT_FAILED")
+        self.assertEqual(result["suggested_action"], "inspect_preflight_report")
+        self.assertIn("PREFLIGHT_FAILED", result["stdout"])
 
     def test_run_batch_builds_flags(self):
         csv_path = Path("data/batches/example.csv")

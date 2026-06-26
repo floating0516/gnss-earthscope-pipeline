@@ -25,7 +25,7 @@ RUNS_ROOT = ROOT / "runs"
 BATCH_SUMMARY = BATCH_ROOT / "batch-summary.tsv"
 LEGACY_BATCH_SUMMARY = RUNS_ROOT / "batch-summary.tsv"
 EVENT_ID_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
-ALLOWED_RADII_KM = {200, 300}
+ALLOWED_RADII_KM = {200, 300, 500, 1000}
 MAX_LIMIT = 1000
 MAX_RUN_BATCH_TIMEOUT = 14400
 MAX_PROCESS_JOBS = 16
@@ -280,12 +280,14 @@ def _list_earthscope_events_for_config(source: str, config: dict[str, Any]) -> d
                    COALESCE(e.place, '') AS place,
                    COALESCE(SUM(CASE WHEN c.radius_km = 200 THEN 1 ELSE 0 END), 0) AS stations_200km,
                    COALESCE(SUM(CASE WHEN c.radius_km = 300 THEN 1 ELSE 0 END), 0) AS stations_300km,
+                   COALESCE(SUM(CASE WHEN c.radius_km = 500 THEN 1 ELSE 0 END), 0) AS stations_500km,
+                   COALESCE(SUM(CASE WHEN c.radius_km = 1000 THEN 1 ELSE 0 END), 0) AS stations_1000km,
                    COALESCE(e.existing_data_status, '') AS existing_data_status,
                    COALESCE(e.existing_station_count, 0) AS existing_station_count
             FROM {event_table} e
             LEFT JOIN event_earthscope_station_candidates c
               ON c.event_id = e.event_id
-             AND c.radius_km IN (200, 300)
+             AND c.radius_km IN (200, 300, 500, 1000)
             GROUP BY e.event_id
             ORDER BY e.magnitude DESC, e.event_date DESC
             """
@@ -799,6 +801,9 @@ def run_batch(
     if use_verified_files:
         env["PIPELINE_VERIFIED_FILES_DB"] = str(db_path)
     result = _run_current_pipeline(args, timeout=timeout + 30, env=env)
+    if not result["ok"] and "PREFLIGHT_FAILED" in f"{result['stdout']}\n{result['stderr']}":
+        result["error_code"] = "EARTHSCOPE_PREFLIGHT_FAILED"
+        result["suggested_action"] = "inspect_preflight_report"
     result["summary_hint"] = _display_path(BATCH_SUMMARY)
     result["process_jobs"] = process_jobs
     result["source"] = "earthscope" if _is_earthscope_source(source) else source
