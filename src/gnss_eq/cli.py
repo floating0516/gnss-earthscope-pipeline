@@ -23,6 +23,7 @@ DOWNLOADER_TOOLS = TOOLS / "earthscope_downloader"
 PRIDE_TOOLS = TOOLS / "pride_processor"
 EARTHSCOPE_METADATA_URL = "https://web-services.unavco.org/backoffice-geoserver-test/gnss/ows"
 DEFAULT_AVAILABILITY_DB = ROOT / "data" / "earthscope_availability" / "earthscope_1hz.sqlite"
+PROXY_ENV_KEYS = ("http_proxy", "https_proxy", "all_proxy", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY")
 
 
 def absolute_path(value: str) -> str:
@@ -37,6 +38,13 @@ def run_command(args: list[str], dry_print: bool = False) -> int:
         print(" ".join(shlex_quote(arg) for arg in args))
         return 0
     return subprocess.call(args)
+
+
+def run_no_proxy_command(args: list[str], *, stdout: object | None = None) -> int:
+    env = os.environ.copy()
+    for key in PROXY_ENV_KEYS:
+        env.pop(key, None)
+    return subprocess.call(args, env=env, stdout=stdout)
 
 
 def shlex_quote(value: str) -> str:
@@ -637,6 +645,138 @@ def cmd_import_usgs_earthscope_events(args: argparse.Namespace) -> int:
     return 0 if report.get("ok") else 1
 
 
+def _run_review_step(cmd: list[str]) -> int:
+    print(f"RUN\t{' '.join(shlex_quote(part) for part in cmd)}", file=sys.stderr)
+    return run_no_proxy_command(cmd, stdout=sys.stderr)
+
+
+def _earthscope_availability_update_cmd(db_path: Path, args: argparse.Namespace) -> list[str]:
+    cmd = [
+        sys.executable,
+        str(SCRIPTS / "availability" / "update_earthscope_availability.py"),
+        "--db",
+        str(db_path),
+        "--recent-days",
+        str(args.recent_days),
+        "--delay",
+        str(args.delay),
+        "--timeout",
+        str(args.timeout),
+        "--max-retries",
+        str(args.max_retries),
+        "--retry-delay",
+        str(args.retry_delay),
+    ]
+    if args.force:
+        cmd.append("--force")
+    if args.dry_run:
+        cmd.append("--dry-run")
+    return cmd
+
+
+def _earthscope_rebuild_candidates_cmd(db_path: Path, metadata_root: Path, args: argparse.Namespace) -> list[str]:
+    cmd = [
+        sys.executable,
+        str(SCRIPTS / "availability" / "rebuild_event_station_candidates.py"),
+        "--db",
+        str(db_path),
+        "--metadata-root",
+        str(metadata_root),
+    ]
+    for event_id in args.event_id or []:
+        cmd.extend(["--event-id", event_id])
+    if args.dry_run:
+        cmd.append("--dry-run")
+    return cmd
+
+
+def _geonet_rebuild_cmd(geonet_db: Path, args: argparse.Namespace) -> list[str]:
+    cmd = [
+        sys.executable,
+        str(SCRIPTS / "database" / "build_geonet_nz_database.py"),
+        "--db",
+        str(geonet_db),
+        "--min-magnitude",
+        str(args.min_magnitude),
+    ]
+    if args.dry_run:
+        cmd.append("--dry-run")
+    return cmd
+
+
+def _geonet_highrate_cmd(geonet_db: Path, args: argparse.Namespace) -> list[str]:
+    return [
+        sys.executable,
+        str(SCRIPTS / "availability" / "update_geonet_event_highrate_availability.py"),
+        "--db",
+        str(geonet_db),
+        "--timeout",
+        str(args.geonet_timeout),
+    ]
+
+
+def cmd_review_usgs(args: argparse.Namespace) -> int:
+    state_db = Path(absolute_path(args.state_db))
+    earthscope_db = Path(absolute_path(args.earthscope_db))
+    earthscope_nonconus_db = Path(absolute_path(args.earthscope_nonconus_db))
+    geonet_db = Path(absolute_path(args.geonet_db))
+    runs_root = Path(absolute_path(args.runs_root))
+    metadata_root = Path(absolute_path(args.earthscope_metadata_root))
+    include_earthscope = args.source in {"all", "earthscope"}
+    include_geonet = args.source in {"all", "geonet"}
+    exit_code = 0
+
+    if include_earthscope and not args.skip_refresh:
+        for db_path in (earthscope_db, earthscope_nonconus_db):
+            rc = _run_review_step(_earthscope_availability_update_cmd(db_path, args))
+            if rc != 0:
+                exit_code = rc
+                break
+
+    if exit_code == 0 and include_earthscope and not args.skip_import:
+        import_report = earthscope_event_import.import_watched_events(
+            state_db=state_db,
+            target=args.target,
+            event_ids=args.event_id,
+            min_magnitude=args.min_magnitude,
+            limit=args.limit,
+            earthscope_db=earthscope_db,
+            earthscope_nonconus_db=earthscope_nonconus_db,
+            dry_run=args.dry_run,
+            update_existing=args.update_existing,
+        )
+        if not import_report.get("ok"):
+            exit_code = 1
+
+    if exit_code == 0 and include_earthscope and not args.skip_rebuild_candidates:
+        for db_path in (earthscope_db, earthscope_nonconus_db):
+            rc = _run_review_step(_earthscope_rebuild_candidates_cmd(db_path, metadata_root, args))
+            if rc != 0:
+                exit_code = rc
+                break
+
+    if exit_code == 0 and include_geonet and args.refresh_geonet and not args.skip_refresh:
+        exit_code = _run_review_step(_geonet_rebuild_cmd(geonet_db, args))
+        if exit_code == 0 and not args.dry_run:
+            exit_code = _run_review_step(_geonet_highrate_cmd(geonet_db, args))
+
+    report = usgs_triage.build_triage_report(
+        state_db=state_db,
+        source=args.source,
+        limit=args.limit,
+        min_magnitude=args.min_magnitude,
+        earthscope_db=earthscope_db,
+        earthscope_nonconus_db=earthscope_nonconus_db,
+        geonet_db=geonet_db,
+        runs_root=runs_root,
+    )
+    if args.format == "json":
+        usgs_triage.write_triage_json(report)
+    else:
+        usgs_triage.write_triage_tsv(report)
+    return exit_code
+
+
 def cmd_watch_usgs(args: argparse.Namespace) -> int:
     args.state_db = absolute_path(args.state_db)
     return usgs_watcher.run_watch_loop(args)
@@ -847,6 +987,41 @@ def build_parser() -> argparse.ArgumentParser:
     import_events.add_argument("--dry-run", action="store_true")
     import_events.add_argument("--update-existing", action="store_true", help="Update rows that already exist instead of skipping them.")
     import_events.set_defaults(func=cmd_import_usgs_earthscope_events)
+
+    review = sub.add_parser(
+        "review-usgs",
+        help="Safely refresh local availability state, import watched events, rebuild candidates, and triage USGS events.",
+    )
+    review.add_argument("--format", choices=["tsv", "json"], default="tsv")
+    review.add_argument("--source", choices=["all", "earthscope", "geonet"], default="all")
+    review.add_argument("--state-db", default=str(usgs_watcher.DEFAULT_STATE_DB), help="USGS watcher SQLite state database path.")
+    review.add_argument("--target", choices=["auto", "usa", "nonconus"], default="auto")
+    review.add_argument("--event-id", action="append", help="Limit EarthScope import/candidate rebuild to this watched event id; can repeat.")
+    review.add_argument("--min-magnitude", type=float, default=6.0)
+    review.add_argument("--limit", type=positive_int, default=20)
+    review.add_argument("--recent-days", type=positive_int, default=7, help="EarthScope daily availability refresh window.")
+    review.add_argument("--earthscope-db", default=str(monitor.DEFAULT_EARTHSCOPE_DB), help="EarthScope USA availability database path.")
+    review.add_argument(
+        "--earthscope-nonconus-db",
+        default=str(monitor.DEFAULT_EARTHSCOPE_NONCONUS_DB),
+        help="EarthScope non-CONUS availability database path.",
+    )
+    review.add_argument("--earthscope-metadata-root", default=str(ROOT / "data" / "earthscope_metadata"), help="EarthScope metadata cache root.")
+    review.add_argument("--geonet-db", default=str(monitor.DEFAULT_GEONET_DB), help="GeoNet availability database path.")
+    review.add_argument("--runs-root", default=str(monitor.DEFAULT_RUNS_ROOT), help="Workflow runs root to inspect for workflow-* outputs.")
+    review.add_argument("--delay", type=float, default=1.5)
+    review.add_argument("--timeout", type=float, default=60.0)
+    review.add_argument("--max-retries", type=int, default=3)
+    review.add_argument("--retry-delay", type=float, default=30.0)
+    review.add_argument("--geonet-timeout", type=positive_int, default=60)
+    review.add_argument("--force", action="store_true")
+    review.add_argument("--dry-run", action="store_true")
+    review.add_argument("--update-existing", action="store_true", help="Update EarthScope event rows that already exist instead of skipping them.")
+    review.add_argument("--skip-refresh", action="store_true", help="Skip availability refresh steps.")
+    review.add_argument("--skip-import", action="store_true", help="Skip importing watched USGS events into EarthScope event tables.")
+    review.add_argument("--skip-rebuild-candidates", action="store_true", help="Skip EarthScope candidate table rebuilds.")
+    review.add_argument("--refresh-geonet", action="store_true", help="Also rebuild GeoNet event DB and event.highrate availability.")
+    review.set_defaults(func=cmd_review_usgs)
 
     watch = sub.add_parser("watch-usgs", help="Continuously watch USGS for new Americas and New Zealand events.")
     watch.add_argument("--once", action="store_true", help="Poll once and exit instead of running a loop.")

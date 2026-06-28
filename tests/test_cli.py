@@ -446,6 +446,134 @@ class CliMonitorCommandTest(unittest.TestCase):
         poll_once.assert_not_called()
         run_watch_loop.assert_not_called()
 
+    def test_review_usgs_runs_safe_steps_and_writes_triage(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            state_db = root / "watcher.sqlite"
+            earthscope_db = root / "earthscope.sqlite"
+            earthscope_nonconus_db = root / "earthscope-nonconus.sqlite"
+            geonet_db = root / "geonet.sqlite"
+            runs_root = root / "runs"
+            metadata_root = root / "metadata"
+            triage_report = {"ok": True, "counts": {}, "events": [], "errors": []}
+            with patch.object(cli, "run_no_proxy_command", return_value=0) as run_no_proxy:
+                with patch.object(cli.earthscope_event_import, "import_watched_events", return_value={"ok": True}) as importer:
+                    with patch.object(cli.usgs_triage, "build_triage_report", return_value=triage_report) as build_report:
+                        with patch.object(cli.usgs_triage, "write_triage_json") as write_json:
+                            rc = cli.main(
+                                [
+                                    "review-usgs",
+                                    "--format",
+                                    "json",
+                                    "--source",
+                                    "earthscope",
+                                    "--state-db",
+                                    str(state_db),
+                                    "--target",
+                                    "nonconus",
+                                    "--event-id",
+                                    "event-a",
+                                    "--min-magnitude",
+                                    "5.5",
+                                    "--limit",
+                                    "8",
+                                    "--recent-days",
+                                    "3",
+                                    "--earthscope-db",
+                                    str(earthscope_db),
+                                    "--earthscope-nonconus-db",
+                                    str(earthscope_nonconus_db),
+                                    "--earthscope-metadata-root",
+                                    str(metadata_root),
+                                    "--geonet-db",
+                                    str(geonet_db),
+                                    "--runs-root",
+                                    str(runs_root),
+                                    "--dry-run",
+                                    "--update-existing",
+                                ]
+                            )
+
+        self.assertEqual(rc, 0)
+        commands = [call.args[0] for call in run_no_proxy.call_args_list]
+        self.assertEqual(len(commands), 4)
+        self.assertTrue(commands[0][1].endswith("scripts/availability/update_earthscope_availability.py"))
+        self.assertEqual(commands[0][commands[0].index("--db") + 1], str(earthscope_db.resolve(strict=False)))
+        self.assertEqual(commands[0][commands[0].index("--recent-days") + 1], "3")
+        self.assertTrue(commands[1][1].endswith("scripts/availability/update_earthscope_availability.py"))
+        self.assertEqual(commands[1][commands[1].index("--db") + 1], str(earthscope_nonconus_db.resolve(strict=False)))
+        self.assertTrue(commands[2][1].endswith("scripts/availability/rebuild_event_station_candidates.py"))
+        self.assertEqual(commands[2][commands[2].index("--db") + 1], str(earthscope_db.resolve(strict=False)))
+        self.assertEqual(commands[2][commands[2].index("--event-id") + 1], "event-a")
+        self.assertIn("--dry-run", commands[2])
+        self.assertTrue(commands[3][1].endswith("scripts/availability/rebuild_event_station_candidates.py"))
+        kwargs = importer.call_args.kwargs
+        self.assertEqual(kwargs["state_db"], state_db.resolve(strict=False))
+        self.assertEqual(kwargs["target"], "nonconus")
+        self.assertEqual(kwargs["event_ids"], ["event-a"])
+        self.assertEqual(kwargs["min_magnitude"], 5.5)
+        self.assertEqual(kwargs["limit"], 8)
+        self.assertEqual(kwargs["earthscope_db"], earthscope_db.resolve(strict=False))
+        self.assertEqual(kwargs["earthscope_nonconus_db"], earthscope_nonconus_db.resolve(strict=False))
+        self.assertTrue(kwargs["dry_run"])
+        self.assertTrue(kwargs["update_existing"])
+        triage_kwargs = build_report.call_args.kwargs
+        self.assertEqual(triage_kwargs["state_db"], state_db.resolve(strict=False))
+        self.assertEqual(triage_kwargs["source"], "earthscope")
+        self.assertEqual(triage_kwargs["earthscope_db"], earthscope_db.resolve(strict=False))
+        self.assertEqual(triage_kwargs["earthscope_nonconus_db"], earthscope_nonconus_db.resolve(strict=False))
+        self.assertEqual(triage_kwargs["geonet_db"], geonet_db.resolve(strict=False))
+        self.assertEqual(triage_kwargs["runs_root"], runs_root.resolve(strict=False))
+        write_json.assert_called_once_with(triage_report)
+
+    def test_review_usgs_does_not_poll_or_run_processing_workflows(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            commands: list[list[str]] = []
+
+            def fake_run(command: list[str], stdout: object | None = None) -> int:
+                commands.append(command)
+                joined = " ".join(command)
+                self.assertNotIn("run_event_1hz_pride_workflow.sh", joined)
+                self.assertNotIn("run_event_batch_workflow.sh", joined)
+                self.assertNotIn("run_geonet_event_1hz_pride_workflow.sh", joined)
+                self.assertNotIn("run_geonet_batch_workflow.sh", joined)
+                return 0
+
+            with patch.object(cli, "run_command", side_effect=AssertionError("run_command called")) as run_command:
+                with patch.object(cli, "run_no_proxy_command", side_effect=fake_run) as run_no_proxy:
+                    with patch.object(cli.subprocess, "run", side_effect=AssertionError("subprocess.run called")) as subprocess_run:
+                        with patch.object(cli.usgs_watcher, "poll_once", side_effect=AssertionError("poll_once called")) as poll_once:
+                            with patch.object(cli.usgs_watcher, "run_watch_loop", side_effect=AssertionError("run_watch_loop called")) as run_watch_loop:
+                                with patch.object(cli.earthscope_event_import, "import_watched_events", return_value={"ok": True}) as importer:
+                                    output = io.StringIO()
+                                    with redirect_stdout(output):
+                                        rc = cli.main(
+                                            [
+                                                "review-usgs",
+                                                "--source",
+                                                "earthscope",
+                                                "--state-db",
+                                                str(root / "missing.sqlite"),
+                                                "--earthscope-db",
+                                                str(root / "earthscope.sqlite"),
+                                                "--earthscope-nonconus-db",
+                                                str(root / "earthscope-nonconus.sqlite"),
+                                                "--geonet-db",
+                                                str(root / "geonet.sqlite"),
+                                            ]
+                                        )
+
+        self.assertEqual(rc, 0)
+        self.assertIn("DATABASE_NOT_FOUND", output.getvalue())
+        self.assertEqual(len(commands), 4)
+        run_command.assert_not_called()
+        run_no_proxy.assert_called()
+        subprocess_run.assert_not_called()
+        poll_once.assert_not_called()
+        run_watch_loop.assert_not_called()
+        importer.assert_called_once()
+
 
 class CliCheckEnvTest(unittest.TestCase):
     def test_check_earthscope_auth_reports_ok_without_token(self):
