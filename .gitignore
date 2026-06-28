@@ -41,6 +41,7 @@ docs/*.md
 !docs/data_sources.md
 !docs/ga_event_catalog.md
 !docs/gnss_1hz_public_sources.md
+!docs/usgs_watcher.md
 scripts/*
 !scripts/workflows/
 !scripts/database/

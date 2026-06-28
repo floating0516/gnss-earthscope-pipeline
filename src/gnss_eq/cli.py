@@ -13,7 +13,7 @@ from pathlib import Path
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-from gnss_eq import preflight
+from gnss_eq import monitor, preflight, usgs_watcher
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -584,6 +584,27 @@ def cmd_search_events(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_monitor(args: argparse.Namespace) -> int:
+    report = monitor.build_monitor_report(
+        source=args.source,
+        limit=args.limit,
+        earthscope_db=Path(absolute_path(args.earthscope_db)),
+        earthscope_nonconus_db=Path(absolute_path(args.earthscope_nonconus_db)),
+        geonet_db=Path(absolute_path(args.geonet_db)),
+        runs_root=Path(absolute_path(args.runs_root)),
+    )
+    if args.format == "json":
+        monitor.write_monitor_json(report)
+    else:
+        monitor.write_monitor_tsv(report)
+    return 0
+
+
+def cmd_watch_usgs(args: argparse.Namespace) -> int:
+    args.state_db = absolute_path(args.state_db)
+    return usgs_watcher.run_watch_loop(args)
+
+
 def cmd_check_env(_: argparse.Namespace) -> int:
     env = preflight.effective_env(strip_proxy=False)
     checks = preflight.command_checks(env)
@@ -739,6 +760,34 @@ def build_parser() -> argparse.ArgumentParser:
     preflight_cmd.add_argument("--no-connectivity", action="store_true", help="Skip authenticated EarthScope curl connectivity check.")
     preflight_cmd.add_argument("--no-database", action="store_true", help="Skip database path checks.")
     preflight_cmd.set_defaults(func=cmd_preflight_earthscope)
+
+    monitor_cmd = sub.add_parser("monitor", help="Read-only status report for EarthScope and GeoNet workflow candidates.")
+    monitor_cmd.add_argument("--format", choices=["tsv", "json"], default="tsv")
+    monitor_cmd.add_argument("--source", choices=["all", "earthscope", "geonet"], default="all")
+    monitor_cmd.add_argument("--limit", type=positive_int, default=20, help="Maximum candidate events per source.")
+    monitor_cmd.add_argument("--earthscope-db", default=str(monitor.DEFAULT_EARTHSCOPE_DB), help="EarthScope USA availability database path.")
+    monitor_cmd.add_argument(
+        "--earthscope-nonconus-db",
+        default=str(monitor.DEFAULT_EARTHSCOPE_NONCONUS_DB),
+        help="EarthScope non-CONUS availability database path.",
+    )
+    monitor_cmd.add_argument("--geonet-db", default=str(monitor.DEFAULT_GEONET_DB), help="GeoNet availability database path.")
+    monitor_cmd.add_argument("--runs-root", default=str(monitor.DEFAULT_RUNS_ROOT), help="Workflow runs root to inspect for workflow-* outputs.")
+    monitor_cmd.set_defaults(func=cmd_monitor)
+
+    watch = sub.add_parser("watch-usgs", help="Continuously watch USGS for new Americas and New Zealand events.")
+    watch.add_argument("--once", action="store_true", help="Poll once and exit instead of running a loop.")
+    watch.add_argument("--interval", type=positive_int, default=300, help="Seconds between polling attempts.")
+    watch.add_argument("--state-db", default=str(usgs_watcher.DEFAULT_STATE_DB), help="SQLite state database path.")
+    watch.add_argument("--ignore-state", action="store_true", help="Use --lookback-minutes even when the state DB has a previous poll.")
+    watch.add_argument("--scope", default="americas,nz", help="Comma-separated scope: americas, nz, or americas,nz.")
+    watch.add_argument("--min-magnitude", type=float, default=6.0, help="Minimum USGS event magnitude.")
+    watch.add_argument("--lookback-minutes", type=positive_int, default=1440, help="Cold-start query lookback window.")
+    watch.add_argument("--overlap-minutes", type=positive_int, default=30, help="Overlap window after the first poll.")
+    watch.add_argument("--limit", type=positive_int, default=2000, help="Maximum events returned per USGS bbox query.")
+    watch.add_argument("--timeout", type=positive_int, default=30, help="USGS HTTP timeout in seconds.")
+    watch.add_argument("--format", choices=["tsv", "jsonl"], default="tsv")
+    watch.set_defaults(func=cmd_watch_usgs)
 
     check = sub.add_parser("check-env", help="Check local runtime dependencies.")
     check.set_defaults(func=cmd_check_env)
