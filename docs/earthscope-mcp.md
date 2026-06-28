@@ -167,13 +167,16 @@ earthscope.overview(view="coverage", source="earthscope", include_env=true)
 
 ## 5. 数据源
 
-`overview` 支持三个主要数据源：
+`overview` 当前支持这些查询数据源：
 
 ```text
 source="earthscope"
+source="earthscope_nonconus"
 source="geonet"
 source="paper"
 ```
+
+其中 `earthscope_nonconus` 是兼容别名。MCP 不暴露 CDDIS、GA/Geoscience Australia、RING/FReDNet、EPOS/GLASS 或 RENAG 的 batch/run 支持；这些代码即使保留在仓库中，也分别属于 research 或 parked exploratory 适配器。当前仓库级数据源优先级见 [`docs/data_sources.md`](data_sources.md)。
 
 ### 5.1 EarthScope / GAGE 数据源
 
@@ -337,7 +340,7 @@ earthscope.overview(view="summary", event_id="nc73666231")
 
 ## 7. `earthscope.batch`
 
-batch CSV 准备入口。它不执行 PRIDE workflow，只负责 preview 或 export CSV。
+batch CSV 准备入口。它不执行 PRIDE workflow，只负责 preview 或 export CSV。该工具面向当前 EarthScope pipeline；GeoNet、CDDIS 和 parked adapters 不通过这个 MCP 工具导出 batch。
 
 参数：
 
@@ -391,7 +394,7 @@ earthscope.batch(event_id="ci38457511", mode="export", radius_km=200, include_ex
 
 ## 8. `earthscope.run_batch`
 
-真正运行 EarthScope/PRIDE workflow。
+真正运行 EarthScope/PRIDE workflow。该工具调用 `scripts/workflows/current_pipeline.sh`，不运行 GeoNet、CDDIS、GA、RING、EPOS 或 RENAG workflow。
 
 参数：
 
