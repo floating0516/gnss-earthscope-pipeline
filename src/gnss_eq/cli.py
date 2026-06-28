@@ -13,7 +13,7 @@ from pathlib import Path
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-from gnss_eq import monitor, preflight, usgs_watcher
+from gnss_eq import earthscope_event_import, monitor, preflight, usgs_triage, usgs_watcher
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -600,6 +600,43 @@ def cmd_monitor(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_triage_usgs(args: argparse.Namespace) -> int:
+    report = usgs_triage.build_triage_report(
+        state_db=Path(absolute_path(args.state_db)),
+        source=args.source,
+        limit=args.limit,
+        min_magnitude=args.min_magnitude,
+        earthscope_db=Path(absolute_path(args.earthscope_db)),
+        earthscope_nonconus_db=Path(absolute_path(args.earthscope_nonconus_db)),
+        geonet_db=Path(absolute_path(args.geonet_db)),
+        runs_root=Path(absolute_path(args.runs_root)),
+    )
+    if args.format == "json":
+        usgs_triage.write_triage_json(report)
+    else:
+        usgs_triage.write_triage_tsv(report)
+    return 0
+
+
+def cmd_import_usgs_earthscope_events(args: argparse.Namespace) -> int:
+    report = earthscope_event_import.import_watched_events(
+        state_db=Path(absolute_path(args.state_db)),
+        target=args.target,
+        event_ids=args.event_id,
+        min_magnitude=args.min_magnitude,
+        limit=args.limit,
+        earthscope_db=Path(absolute_path(args.earthscope_db)),
+        earthscope_nonconus_db=Path(absolute_path(args.earthscope_nonconus_db)),
+        dry_run=args.dry_run,
+        update_existing=args.update_existing,
+    )
+    if args.format == "json":
+        earthscope_event_import.write_import_json(report)
+    else:
+        earthscope_event_import.write_import_tsv(report)
+    return 0 if report.get("ok") else 1
+
+
 def cmd_watch_usgs(args: argparse.Namespace) -> int:
     args.state_db = absolute_path(args.state_db)
     return usgs_watcher.run_watch_loop(args)
@@ -774,6 +811,42 @@ def build_parser() -> argparse.ArgumentParser:
     monitor_cmd.add_argument("--geonet-db", default=str(monitor.DEFAULT_GEONET_DB), help="GeoNet availability database path.")
     monitor_cmd.add_argument("--runs-root", default=str(monitor.DEFAULT_RUNS_ROOT), help="Workflow runs root to inspect for workflow-* outputs.")
     monitor_cmd.set_defaults(func=cmd_monitor)
+
+    triage = sub.add_parser("triage-usgs", help="Read-only review of watched USGS events and suggested next commands.")
+    triage.add_argument("--format", choices=["tsv", "json"], default="tsv")
+    triage.add_argument("--source", choices=["all", "earthscope", "geonet"], default="all")
+    triage.add_argument("--limit", type=positive_int, default=20, help="Maximum watched events to review.")
+    triage.add_argument("--state-db", default=str(usgs_watcher.DEFAULT_STATE_DB), help="USGS watcher SQLite state database path.")
+    triage.add_argument("--min-magnitude", type=float, default=6.0, help="Minimum watched event magnitude to review.")
+    triage.add_argument("--earthscope-db", default=str(monitor.DEFAULT_EARTHSCOPE_DB), help="EarthScope USA availability database path.")
+    triage.add_argument(
+        "--earthscope-nonconus-db",
+        default=str(monitor.DEFAULT_EARTHSCOPE_NONCONUS_DB),
+        help="EarthScope non-CONUS availability database path.",
+    )
+    triage.add_argument("--geonet-db", default=str(monitor.DEFAULT_GEONET_DB), help="GeoNet availability database path.")
+    triage.add_argument("--runs-root", default=str(monitor.DEFAULT_RUNS_ROOT), help="Workflow runs root to inspect for workflow-* outputs.")
+    triage.set_defaults(func=cmd_triage_usgs)
+
+    import_events = sub.add_parser(
+        "import-usgs-earthscope-events",
+        help="Import watched Americas USGS events into EarthScope availability event tables.",
+    )
+    import_events.add_argument("--format", choices=["tsv", "json"], default="tsv")
+    import_events.add_argument("--state-db", default=str(usgs_watcher.DEFAULT_STATE_DB), help="USGS watcher SQLite state database path.")
+    import_events.add_argument("--target", choices=["auto", "usa", "nonconus"], default="auto")
+    import_events.add_argument("--event-id", action="append", help="Import only this watched event id; can repeat.")
+    import_events.add_argument("--min-magnitude", type=float, default=6.0)
+    import_events.add_argument("--limit", type=positive_int, default=20)
+    import_events.add_argument("--earthscope-db", default=str(monitor.DEFAULT_EARTHSCOPE_DB), help="EarthScope USA availability database path.")
+    import_events.add_argument(
+        "--earthscope-nonconus-db",
+        default=str(monitor.DEFAULT_EARTHSCOPE_NONCONUS_DB),
+        help="EarthScope non-CONUS availability database path.",
+    )
+    import_events.add_argument("--dry-run", action="store_true")
+    import_events.add_argument("--update-existing", action="store_true", help="Update rows that already exist instead of skipping them.")
+    import_events.set_defaults(func=cmd_import_usgs_earthscope_events)
 
     watch = sub.add_parser("watch-usgs", help="Continuously watch USGS for new Americas and New Zealand events.")
     watch.add_argument("--once", action="store_true", help="Poll once and exit instead of running a loop.")
