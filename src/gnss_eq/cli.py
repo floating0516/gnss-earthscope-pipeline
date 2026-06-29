@@ -8,6 +8,7 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+from contextlib import redirect_stdout
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlencode
@@ -777,9 +778,99 @@ def cmd_review_usgs(args: argparse.Namespace) -> int:
     return exit_code
 
 
+def _review_source_for_new_events(watch_args: argparse.Namespace, events: list[dict[str, object]]) -> tuple[str, bool]:
+    if watch_args.review_source != "auto":
+        return watch_args.review_source, watch_args.review_refresh_geonet
+    regions = {str(event.get("region") or "") for event in events}
+    has_earthscope = "americas" in regions
+    has_geonet = "new_zealand" in regions
+    if has_earthscope and has_geonet:
+        return "all", True
+    if has_geonet:
+        return "geonet", True
+    return "earthscope", watch_args.review_refresh_geonet
+
+
+def _build_watch_review_args(watch_args: argparse.Namespace, result: dict[str, object]) -> argparse.Namespace:
+    events = [event for event in result.get("events", []) if isinstance(event, dict)]
+    event_ids = [str(event.get("event_id")) for event in events if event.get("event_id")]
+    source, refresh_geonet = _review_source_for_new_events(watch_args, events)
+    return argparse.Namespace(
+        format=watch_args.review_format,
+        source=source,
+        state_db=watch_args.state_db,
+        target=watch_args.review_target,
+        event_id=event_ids,
+        min_magnitude=watch_args.min_magnitude,
+        limit=max(int(watch_args.review_limit), len(event_ids), 1),
+        recent_days=watch_args.review_recent_days,
+        earthscope_db=watch_args.review_earthscope_db,
+        earthscope_nonconus_db=watch_args.review_earthscope_nonconus_db,
+        earthscope_metadata_root=watch_args.review_earthscope_metadata_root,
+        geonet_db=watch_args.review_geonet_db,
+        runs_root=watch_args.review_runs_root,
+        delay=watch_args.review_delay,
+        timeout=watch_args.review_timeout,
+        max_retries=watch_args.review_max_retries,
+        retry_delay=watch_args.review_retry_delay,
+        geonet_timeout=watch_args.review_geonet_timeout,
+        force=watch_args.review_force,
+        dry_run=watch_args.review_dry_run,
+        update_existing=watch_args.review_update_existing,
+        skip_refresh=watch_args.review_skip_refresh,
+        skip_import=watch_args.review_skip_import,
+        skip_rebuild_candidates=watch_args.review_skip_rebuild_candidates,
+        refresh_geonet=refresh_geonet,
+    )
+
+
+def _prefetch_watch_review_metadata(review_args: argparse.Namespace, events: list[dict[str, object]]) -> None:
+    if review_args.dry_run or review_args.skip_rebuild_candidates or review_args.source not in {"all", "earthscope"}:
+        return
+    token: str | None = None
+    seen_days: set[str] = set()
+    metadata_root = Path(absolute_path(review_args.earthscope_metadata_root))
+    for event in events:
+        if str(event.get("region") or "") != "americas":
+            continue
+        event_time = str(event.get("event_time_utc") or "")
+        if not event_time:
+            continue
+        try:
+            year, doy, _, _ = event_day(event_time)
+            day_key = f"{year}-{doy}"
+            if day_key in seen_days:
+                continue
+            seen_days.add(day_key)
+            metadata_file = fetch_earthscope_metadata(event_time, metadata_root, token)
+            print(f"REVIEW\tMETADATA\t{metadata_file}", file=sys.stderr)
+        except Exception as exc:  # noqa: BLE001
+            print(f"REVIEW\tMETADATA_WARN\t{event_time}\t{exc}", file=sys.stderr)
+
+
+def _run_watch_review_for_new_events(watch_args: argparse.Namespace, result: dict[str, object]) -> int:
+    events = [event for event in result.get("events", []) if isinstance(event, dict)]
+    event_ids = [str(event.get("event_id")) for event in events if event.get("event_id")]
+    if not event_ids:
+        return 0
+    review_args = _build_watch_review_args(watch_args, result)
+    print(f"REVIEW\tSTART\tevents={','.join(event_ids)}\tsource={review_args.source}", file=sys.stderr)
+    _prefetch_watch_review_metadata(review_args, events)
+    with redirect_stdout(sys.stderr):
+        exit_code = cmd_review_usgs(review_args)
+    status = "DONE" if exit_code == 0 else "ERROR"
+    print(f"REVIEW\t{status}\texit_code={exit_code}\tevents={','.join(event_ids)}", file=sys.stderr)
+    if exit_code and not watch_args.review_exit_on_error:
+        return 0
+    return exit_code
+
+
 def cmd_watch_usgs(args: argparse.Namespace) -> int:
     args.state_db = absolute_path(args.state_db)
-    return usgs_watcher.run_watch_loop(args)
+    callback = None
+    if args.review_new_events:
+        callback = lambda result: _run_watch_review_for_new_events(args, result)
+    return usgs_watcher.run_watch_loop(args, on_new_events=callback)
 
 
 def cmd_check_env(_: argparse.Namespace) -> int:
@@ -1035,6 +1126,38 @@ def build_parser() -> argparse.ArgumentParser:
     watch.add_argument("--limit", type=positive_int, default=2000, help="Maximum events returned per USGS bbox query.")
     watch.add_argument("--timeout", type=positive_int, default=30, help="USGS HTTP timeout in seconds.")
     watch.add_argument("--format", choices=["tsv", "jsonl"], default="tsv")
+    watch.add_argument("--review-new-events", action="store_true", help="Run safe review-usgs automatically after newly recorded events.")
+    watch.add_argument("--review-source", choices=["auto", "all", "earthscope", "geonet"], default="auto")
+    watch.add_argument("--review-format", choices=["tsv", "json"], default="tsv")
+    watch.add_argument("--review-limit", type=positive_int, default=20)
+    watch.add_argument("--review-recent-days", type=positive_int, default=7)
+    watch.add_argument("--review-target", choices=["auto", "usa", "nonconus"], default="auto")
+    watch.add_argument("--review-earthscope-db", default=str(monitor.DEFAULT_EARTHSCOPE_DB), help="EarthScope USA availability database path for auto-review.")
+    watch.add_argument(
+        "--review-earthscope-nonconus-db",
+        default=str(monitor.DEFAULT_EARTHSCOPE_NONCONUS_DB),
+        help="EarthScope non-CONUS availability database path for auto-review.",
+    )
+    watch.add_argument(
+        "--review-earthscope-metadata-root",
+        default=str(ROOT / "data" / "earthscope_metadata"),
+        help="EarthScope metadata cache root for auto-review.",
+    )
+    watch.add_argument("--review-geonet-db", default=str(monitor.DEFAULT_GEONET_DB), help="GeoNet availability database path for auto-review.")
+    watch.add_argument("--review-runs-root", default=str(monitor.DEFAULT_RUNS_ROOT), help="Workflow runs root for auto-review triage.")
+    watch.add_argument("--review-delay", type=float, default=1.5)
+    watch.add_argument("--review-timeout", type=float, default=60.0)
+    watch.add_argument("--review-max-retries", type=int, default=3)
+    watch.add_argument("--review-retry-delay", type=float, default=30.0)
+    watch.add_argument("--review-geonet-timeout", type=positive_int, default=60)
+    watch.add_argument("--review-force", action="store_true")
+    watch.add_argument("--review-dry-run", action="store_true")
+    watch.add_argument("--review-update-existing", action="store_true")
+    watch.add_argument("--review-skip-refresh", action="store_true")
+    watch.add_argument("--review-skip-import", action="store_true")
+    watch.add_argument("--review-skip-rebuild-candidates", action="store_true")
+    watch.add_argument("--review-refresh-geonet", action="store_true")
+    watch.add_argument("--review-exit-on-error", action="store_true", help="Stop watching when automatic review returns a non-zero exit code.")
     watch.set_defaults(func=cmd_watch_usgs)
 
     check = sub.add_parser("check-env", help="Check local runtime dependencies.")

@@ -175,6 +175,106 @@ class UsgsWatcherTest(unittest.TestCase):
             self.assertEqual(rc, 0)
             self.assertEqual(json.loads(output.getvalue())["new_count"], 1)
 
+    def test_run_watch_loop_calls_hook_for_new_events(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = argparse.Namespace(
+                state_db=str(Path(tmp) / "watcher.sqlite"),
+                scope="nz",
+                min_magnitude=6.0,
+                lookback_minutes=1440,
+                overlap_minutes=30,
+                limit=2000,
+                timeout=30,
+                format="jsonl",
+                once=True,
+                interval=300,
+                ignore_state=False,
+            )
+            calls: list[dict] = []
+
+            def sleeper(_seconds: int) -> None:
+                raise AssertionError("sleep called")
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                rc = usgs_watcher.run_watch_loop(
+                    args,
+                    fetcher=lambda _url, _timeout: make_payload("us-hook"),
+                    sleeper=sleeper,
+                    now=IncrementingClock(),
+                    on_new_events=lambda result: calls.append(result),
+                )
+
+            self.assertEqual(rc, 0)
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(calls[0]["new_count"], 1)
+            self.assertEqual(calls[0]["events"][0]["event_id"], "us-hook")
+
+    def test_run_watch_loop_skips_hook_when_no_new_events(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Path(tmp) / "watcher.sqlite"
+            usgs_watcher.poll_once(state_db=db, scope="nz", fetcher=lambda _url, _timeout: make_payload("us-old"), now=IncrementingClock())
+            args = argparse.Namespace(
+                state_db=str(db),
+                scope="nz",
+                min_magnitude=6.0,
+                lookback_minutes=1440,
+                overlap_minutes=30,
+                limit=2000,
+                timeout=30,
+                format="jsonl",
+                once=True,
+                interval=300,
+                ignore_state=False,
+            )
+            calls: list[dict] = []
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                rc = usgs_watcher.run_watch_loop(
+                    args,
+                    fetcher=lambda _url, _timeout: make_payload("us-old"),
+                    sleeper=lambda _seconds: None,
+                    now=IncrementingClock(),
+                    on_new_events=lambda result: calls.append(result),
+                )
+
+            self.assertEqual(rc, 0)
+            self.assertEqual(calls, [])
+            self.assertEqual(json.loads(output.getvalue())["new_count"], 0)
+
+    def test_run_watch_loop_skips_hook_on_poll_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = argparse.Namespace(
+                state_db=str(Path(tmp) / "watcher.sqlite"),
+                scope="nz",
+                min_magnitude=6.0,
+                lookback_minutes=1440,
+                overlap_minutes=30,
+                limit=2000,
+                timeout=30,
+                format="jsonl",
+                once=True,
+                interval=300,
+                ignore_state=False,
+            )
+
+            def fetcher(_url: str, _timeout: int) -> dict:
+                raise RuntimeError("network down")
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                rc = usgs_watcher.run_watch_loop(
+                    args,
+                    fetcher=fetcher,
+                    sleeper=lambda _seconds: None,
+                    now=IncrementingClock(),
+                    on_new_events=lambda _result: self.fail("hook should not run"),
+                )
+
+            self.assertEqual(rc, 1)
+            self.assertEqual(json.loads(output.getvalue())["status"], "ERROR")
+
     def test_write_tsv_and_jsonl_have_stable_fields(self):
         result = {
             "status": "OK",

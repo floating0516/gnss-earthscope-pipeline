@@ -568,6 +568,7 @@ def run_watch_loop(
     fetcher: FetchJson = fetch_json,
     sleeper: SleepFunc = time.sleep,
     now: NowFunc = utc_now,
+    on_new_events: Callable[[dict[str, Any]], int | None] | None = None,
 ) -> int:
     include_header = True
     try:
@@ -590,6 +591,10 @@ def run_watch_loop(
                 write_tsv(result, include_header=include_header)
                 include_header = False
             sys.stdout.flush()
+            if on_new_events is not None and result.get("status") == "OK" and int(result.get("new_count") or 0) > 0:
+                hook_result = on_new_events(result)
+                if hook_result:
+                    return int(hook_result)
             if args.once:
                 return 0 if result.get("status") == "OK" else 1
             sleeper(args.interval)

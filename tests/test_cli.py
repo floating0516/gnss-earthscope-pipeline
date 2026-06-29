@@ -6,7 +6,7 @@ import json
 import sqlite3
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -294,6 +294,229 @@ class CliMonitorCommandTest(unittest.TestCase):
         self.assertEqual(args.limit, 25)
         self.assertEqual(args.timeout, 9)
         self.assertEqual(args.format, "jsonl")
+        self.assertFalse(args.review_new_events)
+        self.assertIsNone(run_watch_loop.call_args.kwargs["on_new_events"])
+
+    def test_watch_usgs_review_new_events_runs_earthscope_review(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            state_db = root / "watcher.sqlite"
+            earthscope_db = root / "earthscope.sqlite"
+            earthscope_nonconus_db = root / "earthscope-nonconus.sqlite"
+            geonet_db = root / "geonet.sqlite"
+            runs_root = root / "runs"
+            metadata_root = root / "metadata"
+            captured_review_args: list[argparse.Namespace] = []
+
+            def fake_review(args: argparse.Namespace) -> int:
+                captured_review_args.append(args)
+                print("TRIAGE\tOUTPUT")
+                return 0
+
+            with patch.object(cli.usgs_watcher, "run_watch_loop", return_value=0) as run_watch_loop:
+                rc = cli.main(
+                    [
+                        "watch-usgs",
+                        "--once",
+                        "--review-new-events",
+                        "--review-dry-run",
+                        "--review-format",
+                        "json",
+                        "--review-limit",
+                        "1",
+                        "--state-db",
+                        str(state_db),
+                        "--min-magnitude",
+                        "5.5",
+                        "--review-earthscope-db",
+                        str(earthscope_db),
+                        "--review-earthscope-nonconus-db",
+                        str(earthscope_nonconus_db),
+                        "--review-earthscope-metadata-root",
+                        str(metadata_root),
+                        "--review-geonet-db",
+                        str(geonet_db),
+                        "--review-runs-root",
+                        str(runs_root),
+                    ]
+                )
+
+            self.assertEqual(rc, 0)
+            callback = run_watch_loop.call_args.kwargs["on_new_events"]
+            self.assertIsNotNone(callback)
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with patch.object(cli, "cmd_review_usgs", side_effect=fake_review):
+                with redirect_stdout(stdout), redirect_stderr(stderr):
+                    callback_rc = callback(
+                        {
+                            "events": [
+                                {
+                                    "event_id": "us-earthscope",
+                                    "event_time_utc": "2024-01-02T03:04:05Z",
+                                    "region": "americas",
+                                }
+                            ]
+                        }
+                    )
+
+        self.assertEqual(callback_rc, 0)
+        self.assertEqual(stdout.getvalue(), "")
+        self.assertIn("REVIEW\tSTART\tevents=us-earthscope\tsource=earthscope", stderr.getvalue())
+        self.assertIn("TRIAGE\tOUTPUT", stderr.getvalue())
+        self.assertIn("REVIEW\tDONE\texit_code=0\tevents=us-earthscope", stderr.getvalue())
+        review_args = captured_review_args[0]
+        self.assertEqual(review_args.source, "earthscope")
+        self.assertEqual(review_args.event_id, ["us-earthscope"])
+        self.assertEqual(review_args.state_db, str(state_db.resolve(strict=False)))
+        self.assertEqual(review_args.min_magnitude, 5.5)
+        self.assertEqual(review_args.limit, 1)
+        self.assertEqual(review_args.earthscope_db, str(earthscope_db))
+        self.assertEqual(review_args.earthscope_nonconus_db, str(earthscope_nonconus_db))
+        self.assertEqual(review_args.earthscope_metadata_root, str(metadata_root))
+        self.assertEqual(review_args.geonet_db, str(geonet_db))
+        self.assertEqual(review_args.runs_root, str(runs_root))
+        self.assertTrue(review_args.dry_run)
+        self.assertFalse(review_args.refresh_geonet)
+
+    def test_watch_usgs_review_new_events_maps_geonet_and_mixed_sources(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with patch.object(cli.usgs_watcher, "run_watch_loop", return_value=0) as run_watch_loop:
+                rc = cli.main(
+                    [
+                        "watch-usgs",
+                        "--once",
+                        "--review-new-events",
+                        "--review-dry-run",
+                        "--state-db",
+                        str(root / "watcher.sqlite"),
+                    ]
+                )
+
+            self.assertEqual(rc, 0)
+            callback = run_watch_loop.call_args.kwargs["on_new_events"]
+            captured_review_args: list[argparse.Namespace] = []
+
+            def fake_review(args: argparse.Namespace) -> int:
+                captured_review_args.append(args)
+                return 0
+
+            with patch.object(cli, "cmd_review_usgs", side_effect=fake_review):
+                with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                    callback(
+                        {
+                            "events": [
+                                {
+                                    "event_id": "us-geonet",
+                                    "event_time_utc": "2024-01-02T03:04:05Z",
+                                    "region": "new_zealand",
+                                }
+                            ]
+                        }
+                    )
+                    callback(
+                        {
+                            "events": [
+                                {
+                                    "event_id": "us-earthscope",
+                                    "event_time_utc": "2024-01-02T03:04:05Z",
+                                    "region": "americas",
+                                },
+                                {
+                                    "event_id": "us-geonet",
+                                    "event_time_utc": "2024-01-02T03:04:05Z",
+                                    "region": "new_zealand",
+                                },
+                            ]
+                        }
+                    )
+
+        self.assertEqual(captured_review_args[0].source, "geonet")
+        self.assertTrue(captured_review_args[0].refresh_geonet)
+        self.assertEqual(captured_review_args[0].event_id, ["us-geonet"])
+        self.assertEqual(captured_review_args[1].source, "all")
+        self.assertTrue(captured_review_args[1].refresh_geonet)
+        self.assertEqual(captured_review_args[1].event_id, ["us-earthscope", "us-geonet"])
+
+    def test_watch_usgs_review_new_events_continues_by_default_after_review_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with patch.object(cli.usgs_watcher, "run_watch_loop", return_value=0) as run_watch_loop:
+                cli.main(
+                    [
+                        "watch-usgs",
+                        "--once",
+                        "--review-new-events",
+                        "--review-dry-run",
+                        "--state-db",
+                        str(root / "watcher.sqlite"),
+                    ]
+                )
+            callback = run_watch_loop.call_args.kwargs["on_new_events"]
+
+            with patch.object(cli, "cmd_review_usgs", return_value=7):
+                with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                    rc = callback({"events": [{"event_id": "us-error", "region": "americas"}]})
+
+        self.assertEqual(rc, 0)
+
+    def test_watch_usgs_review_new_events_can_exit_on_review_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with patch.object(cli.usgs_watcher, "run_watch_loop", return_value=0) as run_watch_loop:
+                cli.main(
+                    [
+                        "watch-usgs",
+                        "--once",
+                        "--review-new-events",
+                        "--review-dry-run",
+                        "--review-exit-on-error",
+                        "--state-db",
+                        str(root / "watcher.sqlite"),
+                    ]
+                )
+            callback = run_watch_loop.call_args.kwargs["on_new_events"]
+
+            with patch.object(cli, "cmd_review_usgs", return_value=7):
+                with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                    rc = callback({"events": [{"event_id": "us-error", "region": "americas"}]})
+
+        self.assertEqual(rc, 7)
+
+    def test_watch_usgs_review_new_events_does_not_run_processing_workflows(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with patch.object(cli.usgs_watcher, "run_watch_loop", return_value=0) as run_watch_loop:
+                cli.main(
+                    [
+                        "watch-usgs",
+                        "--once",
+                        "--review-new-events",
+                        "--review-dry-run",
+                        "--state-db",
+                        str(root / "watcher.sqlite"),
+                    ]
+                )
+            callback = run_watch_loop.call_args.kwargs["on_new_events"]
+
+            def fake_review(args: argparse.Namespace) -> int:
+                self.assertNotIn("run_event_1hz_pride_workflow.sh", str(args))
+                self.assertNotIn("run_event_batch_workflow.sh", str(args))
+                self.assertNotIn("run_geonet_event_1hz_pride_workflow.sh", str(args))
+                self.assertNotIn("run_geonet_batch_workflow.sh", str(args))
+                return 0
+
+            with patch.object(cli, "run_command", side_effect=AssertionError("run_command called")) as run_command:
+                with patch.object(cli.subprocess, "run", side_effect=AssertionError("subprocess.run called")) as subprocess_run:
+                    with patch.object(cli, "cmd_review_usgs", side_effect=fake_review) as review:
+                        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                            rc = callback({"events": [{"event_id": "us-safe", "region": "americas"}]})
+
+        self.assertEqual(rc, 0)
+        run_command.assert_not_called()
+        subprocess_run.assert_not_called()
+        review.assert_called_once()
 
     def test_triage_usgs_forwards_arguments(self):
         with tempfile.TemporaryDirectory() as tmp:
