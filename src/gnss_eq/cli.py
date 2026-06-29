@@ -716,7 +716,7 @@ def _geonet_highrate_cmd(geonet_db: Path, args: argparse.Namespace) -> list[str]
     ]
 
 
-def cmd_review_usgs(args: argparse.Namespace) -> int:
+def _review_usgs(args: argparse.Namespace) -> tuple[int, dict[str, object]]:
     state_db = Path(absolute_path(args.state_db))
     earthscope_db = Path(absolute_path(args.earthscope_db))
     earthscope_nonconus_db = Path(absolute_path(args.earthscope_nonconus_db))
@@ -771,10 +771,19 @@ def cmd_review_usgs(args: argparse.Namespace) -> int:
         geonet_db=geonet_db,
         runs_root=runs_root,
     )
+    return exit_code, report
+
+
+def _write_review_report(args: argparse.Namespace, report: dict[str, object]) -> None:
     if args.format == "json":
         usgs_triage.write_triage_json(report)
     else:
         usgs_triage.write_triage_tsv(report)
+
+
+def cmd_review_usgs(args: argparse.Namespace) -> int:
+    exit_code, report = _review_usgs(args)
+    _write_review_report(args, report)
     return exit_code
 
 
@@ -848,6 +857,82 @@ def _prefetch_watch_review_metadata(review_args: argparse.Namespace, events: lis
             print(f"REVIEW\tMETADATA_WARN\t{event_time}\t{exc}", file=sys.stderr)
 
 
+def _high_earthscope_events(report: dict[str, object]) -> list[dict[str, object]]:
+    events = report.get("events", [])
+    if not isinstance(events, list):
+        return []
+    return [
+        event
+        for event in events
+        if isinstance(event, dict)
+        and str(event.get("source") or "") == "earthscope"
+        and str(event.get("priority") or "") == "HIGH"
+        and str(event.get("suggested_action") or "") == "REVIEW_PREPARE_BATCH"
+        and str(event.get("workflow_status") or "") != "WORKFLOW_EXISTS"
+        and event.get("event_id")
+    ]
+
+
+def _current_pipeline_cmd(*parts: str) -> list[str]:
+    return [str(SCRIPTS / "workflows" / "current_pipeline.sh"), *parts]
+
+
+def _run_process_step(cmd: list[str]) -> int:
+    print(f"PROCESS\tRUN\t{' '.join(shlex_quote(part) for part in cmd)}", file=sys.stderr)
+    return run_no_proxy_command(cmd, stdout=sys.stderr)
+
+
+def _process_high_earthscope_events(watch_args: argparse.Namespace, report: dict[str, object]) -> int:
+    if watch_args.review_dry_run:
+        print("PROCESS\tSKIP\treason=dry_run", file=sys.stderr)
+        return 0
+    if not watch_args.review_process_high:
+        return 0
+
+    for event in report.get("events", []):
+        if not isinstance(event, dict):
+            continue
+        event_id = str(event.get("event_id") or "")
+        if str(event.get("priority") or "") == "HIGH" and str(event.get("source") or "") == "geonet":
+            print(f"PROCESS\tSKIP\tevent_id={event_id}\tsource=geonet\treason=unsupported", file=sys.stderr)
+
+    exit_code = 0
+    radius_km = int(watch_args.review_process_radius_km)
+    for event in _high_earthscope_events(report):
+        event_id = str(event["event_id"])
+        batch_csv = f"data/batches/{event_id}-{radius_km}km.csv"
+        print(f"PROCESS\tSTART\tevent_id={event_id}\tsource=earthscope\tradius_km={radius_km}", file=sys.stderr)
+        export_cmd = _current_pipeline_cmd("export-batch", "--event-id", event_id, "--radius-km", str(radius_km))
+        rc = _run_process_step(export_cmd)
+        if rc != 0:
+            print(f"PROCESS\tERROR\texit_code={rc}\tevent_id={event_id}\tstep=export-batch", file=sys.stderr)
+            exit_code = rc
+            break
+        run_cmd = _current_pipeline_cmd(
+            "run-batch",
+            "--csv",
+            batch_csv,
+            "--timeout",
+            str(watch_args.review_process_timeout),
+            "--process-jobs",
+            str(watch_args.review_process_jobs),
+        )
+        for flag, enabled in [
+            ("--cleanup-pride-workdir", watch_args.review_process_cleanup_pride_workdir),
+            ("--cleanup-obs", watch_args.review_process_cleanup_obs),
+            ("--rerun-ok", watch_args.review_process_rerun_ok),
+        ]:
+            if enabled:
+                run_cmd.append(flag)
+        rc = _run_process_step(run_cmd)
+        if rc != 0:
+            print(f"PROCESS\tERROR\texit_code={rc}\tevent_id={event_id}\tstep=run-batch", file=sys.stderr)
+            exit_code = rc
+            break
+        print(f"PROCESS\tDONE\tevent_id={event_id}\tcsv={batch_csv}", file=sys.stderr)
+    return exit_code
+
+
 def _run_watch_review_for_new_events(watch_args: argparse.Namespace, result: dict[str, object]) -> int:
     events = [event for event in result.get("events", []) if isinstance(event, dict)]
     event_ids = [str(event.get("event_id")) for event in events if event.get("event_id")]
@@ -857,12 +942,16 @@ def _run_watch_review_for_new_events(watch_args: argparse.Namespace, result: dic
     print(f"REVIEW\tSTART\tevents={','.join(event_ids)}\tsource={review_args.source}", file=sys.stderr)
     _prefetch_watch_review_metadata(review_args, events)
     with redirect_stdout(sys.stderr):
-        exit_code = cmd_review_usgs(review_args)
+        exit_code, report = _review_usgs(review_args)
+        _write_review_report(review_args, report)
     status = "DONE" if exit_code == 0 else "ERROR"
     print(f"REVIEW\t{status}\texit_code={exit_code}\tevents={','.join(event_ids)}", file=sys.stderr)
-    if exit_code and not watch_args.review_exit_on_error:
+    if exit_code:
+        return int(exit_code) if watch_args.review_exit_on_error else 0
+    process_exit_code = _process_high_earthscope_events(watch_args, report)
+    if process_exit_code and not watch_args.review_exit_on_error:
         return 0
-    return exit_code
+    return process_exit_code
 
 
 def cmd_watch_usgs(args: argparse.Namespace) -> int:
@@ -1157,6 +1246,13 @@ def build_parser() -> argparse.ArgumentParser:
     watch.add_argument("--review-skip-import", action="store_true")
     watch.add_argument("--review-skip-rebuild-candidates", action="store_true")
     watch.add_argument("--review-refresh-geonet", action="store_true")
+    watch.add_argument("--review-process-high", action="store_true", help="After auto-review, run the standard EarthScope workflow for HIGH events.")
+    watch.add_argument("--review-process-radius-km", type=positive_int, default=200)
+    watch.add_argument("--review-process-timeout", type=positive_int, default=3600)
+    watch.add_argument("--review-process-jobs", type=positive_int, default=1)
+    watch.add_argument("--review-process-cleanup-pride-workdir", action="store_true")
+    watch.add_argument("--review-process-cleanup-obs", action="store_true")
+    watch.add_argument("--review-process-rerun-ok", action="store_true")
     watch.add_argument("--review-exit-on-error", action="store_true", help="Stop watching when automatic review returns a non-zero exit code.")
     watch.set_defaults(func=cmd_watch_usgs)
 

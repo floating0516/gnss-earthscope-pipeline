@@ -112,6 +112,10 @@ def create_monitor_geonet_db(path: Path) -> None:
     conn.close()
 
 
+def triage_report(events: list[dict[str, object]]) -> dict[str, object]:
+    return {"ok": True, "counts": {"total": len(events)}, "events": events, "errors": []}
+
+
 class CliMonitorCommandTest(unittest.TestCase):
     def test_monitor_tsv_reports_prioritized_candidates(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -308,10 +312,9 @@ class CliMonitorCommandTest(unittest.TestCase):
             metadata_root = root / "metadata"
             captured_review_args: list[argparse.Namespace] = []
 
-            def fake_review(args: argparse.Namespace) -> int:
+            def fake_review(args: argparse.Namespace) -> tuple[int, dict[str, object]]:
                 captured_review_args.append(args)
-                print("TRIAGE\tOUTPUT")
-                return 0
+                return 0, {"ok": True, "counts": {}, "events": [], "errors": []}
 
             with patch.object(cli.usgs_watcher, "run_watch_loop", return_value=0) as run_watch_loop:
                 rc = cli.main(
@@ -346,7 +349,7 @@ class CliMonitorCommandTest(unittest.TestCase):
             self.assertIsNotNone(callback)
             stdout = io.StringIO()
             stderr = io.StringIO()
-            with patch.object(cli, "cmd_review_usgs", side_effect=fake_review):
+            with patch.object(cli, "_review_usgs", side_effect=fake_review):
                 with redirect_stdout(stdout), redirect_stderr(stderr):
                     callback_rc = callback(
                         {
@@ -363,7 +366,7 @@ class CliMonitorCommandTest(unittest.TestCase):
         self.assertEqual(callback_rc, 0)
         self.assertEqual(stdout.getvalue(), "")
         self.assertIn("REVIEW\tSTART\tevents=us-earthscope\tsource=earthscope", stderr.getvalue())
-        self.assertIn("TRIAGE\tOUTPUT", stderr.getvalue())
+        self.assertIn('"ok": true', stderr.getvalue())
         self.assertIn("REVIEW\tDONE\texit_code=0\tevents=us-earthscope", stderr.getvalue())
         review_args = captured_review_args[0]
         self.assertEqual(review_args.source, "earthscope")
@@ -398,11 +401,11 @@ class CliMonitorCommandTest(unittest.TestCase):
             callback = run_watch_loop.call_args.kwargs["on_new_events"]
             captured_review_args: list[argparse.Namespace] = []
 
-            def fake_review(args: argparse.Namespace) -> int:
+            def fake_review(args: argparse.Namespace) -> tuple[int, dict[str, object]]:
                 captured_review_args.append(args)
-                return 0
+                return 0, {"ok": True, "counts": {}, "events": [], "errors": []}
 
-            with patch.object(cli, "cmd_review_usgs", side_effect=fake_review):
+            with patch.object(cli, "_review_usgs", side_effect=fake_review):
                 with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
                     callback(
                         {
@@ -455,7 +458,7 @@ class CliMonitorCommandTest(unittest.TestCase):
                 )
             callback = run_watch_loop.call_args.kwargs["on_new_events"]
 
-            with patch.object(cli, "cmd_review_usgs", return_value=7):
+            with patch.object(cli, "_review_usgs", return_value=(7, {"ok": False, "counts": {}, "events": [], "errors": []})):
                 with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
                     rc = callback({"events": [{"event_id": "us-error", "region": "americas"}]})
 
@@ -478,7 +481,7 @@ class CliMonitorCommandTest(unittest.TestCase):
                 )
             callback = run_watch_loop.call_args.kwargs["on_new_events"]
 
-            with patch.object(cli, "cmd_review_usgs", return_value=7):
+            with patch.object(cli, "_review_usgs", return_value=(7, {"ok": False, "counts": {}, "events": [], "errors": []})):
                 with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
                     rc = callback({"events": [{"event_id": "us-error", "region": "americas"}]})
 
@@ -500,16 +503,16 @@ class CliMonitorCommandTest(unittest.TestCase):
                 )
             callback = run_watch_loop.call_args.kwargs["on_new_events"]
 
-            def fake_review(args: argparse.Namespace) -> int:
+            def fake_review(args: argparse.Namespace) -> tuple[int, dict[str, object]]:
                 self.assertNotIn("run_event_1hz_pride_workflow.sh", str(args))
                 self.assertNotIn("run_event_batch_workflow.sh", str(args))
                 self.assertNotIn("run_geonet_event_1hz_pride_workflow.sh", str(args))
                 self.assertNotIn("run_geonet_batch_workflow.sh", str(args))
-                return 0
+                return 0, {"ok": True, "counts": {}, "events": [], "errors": []}
 
             with patch.object(cli, "run_command", side_effect=AssertionError("run_command called")) as run_command:
                 with patch.object(cli.subprocess, "run", side_effect=AssertionError("subprocess.run called")) as subprocess_run:
-                    with patch.object(cli, "cmd_review_usgs", side_effect=fake_review) as review:
+                    with patch.object(cli, "_review_usgs", side_effect=fake_review) as review:
                         with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
                             rc = callback({"events": [{"event_id": "us-safe", "region": "americas"}]})
 
@@ -517,6 +520,220 @@ class CliMonitorCommandTest(unittest.TestCase):
         run_command.assert_not_called()
         subprocess_run.assert_not_called()
         review.assert_called_once()
+
+    def test_watch_usgs_review_process_high_runs_current_pipeline(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with patch.object(cli.usgs_watcher, "run_watch_loop", return_value=0) as run_watch_loop:
+                cli.main(
+                    [
+                        "watch-usgs",
+                        "--once",
+                        "--review-new-events",
+                        "--review-process-high",
+                        "--review-process-radius-km",
+                        "300",
+                        "--review-process-timeout",
+                        "7200",
+                        "--review-process-jobs",
+                        "2",
+                        "--review-process-cleanup-pride-workdir",
+                        "--review-process-cleanup-obs",
+                        "--review-process-rerun-ok",
+                        "--state-db",
+                        str(root / "watcher.sqlite"),
+                    ]
+                )
+            callback = run_watch_loop.call_args.kwargs["on_new_events"]
+            report = triage_report(
+                [
+                    {
+                        "event_id": "us-high",
+                        "source": "earthscope",
+                        "priority": "HIGH",
+                        "suggested_action": "REVIEW_PREPARE_BATCH",
+                        "workflow_status": "MISSING",
+                    }
+                ]
+            )
+
+            with patch.object(cli, "_review_usgs", return_value=(0, report)):
+                with patch.object(cli, "run_no_proxy_command", return_value=0) as run_no_proxy:
+                    stdout = io.StringIO()
+                    stderr = io.StringIO()
+                    with redirect_stdout(stdout), redirect_stderr(stderr):
+                        rc = callback({"events": [{"event_id": "us-high", "region": "americas"}]})
+
+        self.assertEqual(rc, 0)
+        self.assertEqual(stdout.getvalue(), "")
+        commands = [call.args[0] for call in run_no_proxy.call_args_list]
+        self.assertEqual(len(commands), 2)
+        self.assertTrue(commands[0][0].endswith("scripts/workflows/current_pipeline.sh"))
+        self.assertEqual(commands[0][1:], ["export-batch", "--event-id", "us-high", "--radius-km", "300"])
+        self.assertEqual(
+            commands[1][1:],
+            [
+                "run-batch",
+                "--csv",
+                "data/batches/us-high-300km.csv",
+                "--timeout",
+                "7200",
+                "--process-jobs",
+                "2",
+                "--cleanup-pride-workdir",
+                "--cleanup-obs",
+                "--rerun-ok",
+            ],
+        )
+        self.assertIn("PROCESS\tSTART\tevent_id=us-high", stderr.getvalue())
+        self.assertIn("PROCESS\tDONE\tevent_id=us-high", stderr.getvalue())
+
+    def test_watch_usgs_review_process_high_skips_ineligible_events(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with patch.object(cli.usgs_watcher, "run_watch_loop", return_value=0) as run_watch_loop:
+                cli.main(
+                    [
+                        "watch-usgs",
+                        "--once",
+                        "--review-new-events",
+                        "--review-process-high",
+                        "--state-db",
+                        str(root / "watcher.sqlite"),
+                    ]
+                )
+            callback = run_watch_loop.call_args.kwargs["on_new_events"]
+            report = triage_report(
+                [
+                    {
+                        "event_id": "us-medium",
+                        "source": "earthscope",
+                        "priority": "MEDIUM",
+                        "suggested_action": "REVIEW_PREPARE_BATCH",
+                        "workflow_status": "MISSING",
+                    },
+                    {
+                        "event_id": "us-existing",
+                        "source": "earthscope",
+                        "priority": "SKIP",
+                        "suggested_action": "SKIP_WORKFLOW_EXISTS",
+                        "workflow_status": "WORKFLOW_EXISTS",
+                    },
+                    {
+                        "event_id": "us-geonet",
+                        "source": "geonet",
+                        "priority": "HIGH",
+                        "suggested_action": "REVIEW_PREPARE_BATCH",
+                        "workflow_status": "MISSING",
+                    },
+                ]
+            )
+
+            with patch.object(cli, "_review_usgs", return_value=(0, report)):
+                with patch.object(cli, "run_no_proxy_command", side_effect=AssertionError("processing called")) as run_no_proxy:
+                    stderr = io.StringIO()
+                    with redirect_stdout(io.StringIO()), redirect_stderr(stderr):
+                        rc = callback({"events": [{"event_id": "us-high", "region": "americas"}]})
+
+        self.assertEqual(rc, 0)
+        run_no_proxy.assert_not_called()
+        self.assertIn("PROCESS\tSKIP\tevent_id=us-geonet\tsource=geonet\treason=unsupported", stderr.getvalue())
+
+    def test_watch_usgs_review_process_high_skips_on_dry_run_and_review_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with patch.object(cli.usgs_watcher, "run_watch_loop", return_value=0) as run_watch_loop:
+                cli.main(
+                    [
+                        "watch-usgs",
+                        "--once",
+                        "--review-new-events",
+                        "--review-process-high",
+                        "--review-dry-run",
+                        "--state-db",
+                        str(root / "watcher.sqlite"),
+                    ]
+                )
+            callback = run_watch_loop.call_args.kwargs["on_new_events"]
+            report = triage_report(
+                [
+                    {
+                        "event_id": "us-high",
+                        "source": "earthscope",
+                        "priority": "HIGH",
+                        "suggested_action": "REVIEW_PREPARE_BATCH",
+                        "workflow_status": "MISSING",
+                    }
+                ]
+            )
+
+            with patch.object(cli, "_review_usgs", return_value=(0, report)):
+                with patch.object(cli, "run_no_proxy_command", side_effect=AssertionError("processing called")) as run_no_proxy:
+                    stderr = io.StringIO()
+                    with redirect_stdout(io.StringIO()), redirect_stderr(stderr):
+                        dry_run_rc = callback({"events": [{"event_id": "us-high", "region": "americas"}]})
+
+            with patch.object(cli, "_review_usgs", return_value=(3, report)):
+                with patch.object(cli, "run_no_proxy_command", side_effect=AssertionError("processing called")):
+                    with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                        review_error_rc = callback({"events": [{"event_id": "us-high", "region": "americas"}]})
+
+        self.assertEqual(dry_run_rc, 0)
+        self.assertEqual(review_error_rc, 0)
+        run_no_proxy.assert_not_called()
+        self.assertIn("PROCESS\tSKIP\treason=dry_run", stderr.getvalue())
+
+    def test_watch_usgs_review_process_high_error_policy(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            report = triage_report(
+                [
+                    {
+                        "event_id": "us-high",
+                        "source": "earthscope",
+                        "priority": "HIGH",
+                        "suggested_action": "REVIEW_PREPARE_BATCH",
+                        "workflow_status": "MISSING",
+                    }
+                ]
+            )
+            with patch.object(cli.usgs_watcher, "run_watch_loop", return_value=0) as run_watch_loop:
+                cli.main(
+                    [
+                        "watch-usgs",
+                        "--once",
+                        "--review-new-events",
+                        "--review-process-high",
+                        "--state-db",
+                        str(root / "watcher.sqlite"),
+                    ]
+                )
+            callback = run_watch_loop.call_args.kwargs["on_new_events"]
+            with patch.object(cli, "_review_usgs", return_value=(0, report)):
+                with patch.object(cli, "run_no_proxy_command", return_value=9):
+                    with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                        continue_rc = callback({"events": [{"event_id": "us-high", "region": "americas"}]})
+
+            with patch.object(cli.usgs_watcher, "run_watch_loop", return_value=0) as run_watch_loop:
+                cli.main(
+                    [
+                        "watch-usgs",
+                        "--once",
+                        "--review-new-events",
+                        "--review-process-high",
+                        "--review-exit-on-error",
+                        "--state-db",
+                        str(root / "watcher.sqlite"),
+                    ]
+                )
+            callback = run_watch_loop.call_args.kwargs["on_new_events"]
+            with patch.object(cli, "_review_usgs", return_value=(0, report)):
+                with patch.object(cli, "run_no_proxy_command", return_value=9):
+                    with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                        exit_rc = callback({"events": [{"event_id": "us-high", "region": "americas"}]})
+
+        self.assertEqual(continue_rc, 0)
+        self.assertEqual(exit_rc, 9)
 
     def test_triage_usgs_forwards_arguments(self):
         with tempfile.TemporaryDirectory() as tmp:
