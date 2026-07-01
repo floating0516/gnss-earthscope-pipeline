@@ -46,8 +46,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--station-aggregation", choices=["median", "mean", "trimmed-mean"], default="median")
     parser.add_argument("--trim-fraction", type=float, default=0.20)
     parser.add_argument("--max-pgd-time-offset", type=float, default=0.0)
+    parser.add_argument("--noise-window-start", type=float, default=-300.0)
+    parser.add_argument("--noise-window-end", type=float, default=0.0)
+    parser.add_argument("--min-pgd-snr", type=float, default=3.0)
+    parser.add_argument("--near-distance-km", type=float, default=300.0)
     parser.add_argument("--min-distance-km", type=float, default=1.0)
     parser.add_argument("--max-distance-km", type=float, default=0.0)
+    parser.add_argument("--quality-max-distance-km", type=float, default=500.0)
+    parser.add_argument("--quality-max-pgd-time-offset", type=float, default=300.0)
     parser.add_argument("--min-pgd-m", type=float, default=1e-6)
     parser.add_argument("--min-stations", type=int, default=1)
     parser.add_argument("--calibration", choices=["none", "leave-one-out-country-linear"], default="none")
@@ -81,18 +87,25 @@ def iter_event_dirs(root: Path, countries: set[str]) -> Iterable[Path]:
                 yield event_json.parent
 
 
+def displacement_amplitude(e: float, n: float, u: float, pgd_component: str) -> float:
+    return math.hypot(e, n) if pgd_component == "horizontal" else math.sqrt(e * e + n * n + u * u)
+
+
 def read_pgd_by_station(
     waveform_path: Path,
     window_start: float,
     window_end: float,
     min_pgd_m: float,
     pgd_component: str,
+    noise_window_start: float,
+    noise_window_end: float,
 ) -> dict[str, dict[str, float]]:
-    components: dict[str, dict[float, dict[str, float]]] = defaultdict(lambda: defaultdict(dict))
+    pgd_components: dict[str, dict[float, dict[str, float]]] = defaultdict(lambda: defaultdict(dict))
+    noise_components: dict[str, dict[float, dict[str, float]]] = defaultdict(lambda: defaultdict(dict))
     with gzip.open(waveform_path, "rt", newline="") as handle:
         for row in csv.DictReader(handle):
             offset = finite_float(row.get("Time_Offset_s"))
-            if not math.isfinite(offset) or offset < window_start or offset > window_end:
+            if not math.isfinite(offset):
                 continue
             component = str(row.get("Component") or "").upper()
             if component not in {"E", "N", "U"}:
@@ -101,10 +114,13 @@ def read_pgd_by_station(
             if not math.isfinite(value):
                 continue
             station = str(row.get("Station") or "").upper()
-            components[station][offset][component] = value
+            if window_start <= offset <= window_end:
+                pgd_components[station][offset][component] = value
+            if noise_window_start <= offset < noise_window_end:
+                noise_components[station][offset][component] = value
 
     result: dict[str, dict[str, float]] = {}
-    for station, by_time in components.items():
+    for station, by_time in pgd_components.items():
         pgd_m = math.nan
         pgd_time = math.nan
         pgd_e = math.nan
@@ -118,13 +134,19 @@ def read_pgd_by_station(
             e = values["E"]
             n = values["N"]
             u = values["U"]
-            amplitude = math.hypot(e, n) if pgd_component == "horizontal" else math.sqrt(e * e + n * n + u * u)
+            amplitude = displacement_amplitude(e, n, u, pgd_component)
             if not math.isfinite(pgd_m) or amplitude > pgd_m:
                 pgd_m = amplitude
                 pgd_time = offset
                 pgd_e = e
                 pgd_n = n
                 pgd_u = u
+        noise_amplitudes = []
+        for values in noise_components.get(station, {}).values():
+            if {"E", "N", "U"}.issubset(values):
+                noise_amplitudes.append(displacement_amplitude(values["E"], values["N"], values["U"], pgd_component))
+        pre_event_rms_m = rms(noise_amplitudes)
+        pgd_snr = pgd_m / pre_event_rms_m if math.isfinite(pre_event_rms_m) and pre_event_rms_m > 0 else math.nan
         if math.isfinite(pgd_m) and pgd_m >= min_pgd_m:
             result[station] = {
                 "pgd_m": pgd_m,
@@ -134,6 +156,10 @@ def read_pgd_by_station(
                 "pgd_n_m": pgd_n,
                 "pgd_u_m": pgd_u,
                 "pgd_sample_count": float(sample_count),
+                "pre_event_rms_m": pre_event_rms_m,
+                "pre_event_rms_cm": pre_event_rms_m * 100.0 if math.isfinite(pre_event_rms_m) else math.nan,
+                "noise_sample_count": float(len(noise_amplitudes)),
+                "pgd_snr": pgd_snr,
             }
     return result
 
@@ -192,6 +218,10 @@ def rmse(values: list[float]) -> float:
     return math.sqrt(sum(value * value for value in values) / len(values)) if values else math.nan
 
 
+def rms(values: list[float]) -> float:
+    return math.sqrt(sum(value * value for value in values) / len(values)) if values else math.nan
+
+
 def linear_fit(xs: list[float], ys: list[float]) -> tuple[float, float]:
     if len(xs) < 2:
         return 0.0, 1.0
@@ -236,6 +266,32 @@ def apply_leave_one_out_calibration(event_rows: list[dict[str, object]]) -> list
     return calibrated
 
 
+def event_reliability(usable_count: int, median_snr: float) -> str:
+    if usable_count >= 5 and math.isfinite(median_snr) and median_snr >= 5.0:
+        return "HIGH"
+    if usable_count >= 3 and math.isfinite(median_snr) and median_snr >= 3.0:
+        return "MEDIUM"
+    if usable_count >= 1:
+        return "LOW"
+    return "UNUSABLE"
+
+
+def station_quality_flags(pgd: dict[str, float], distance_km: float, args: argparse.Namespace) -> tuple[bool, str]:
+    flags = []
+    snr = float(pgd.get("pgd_snr", math.nan))
+    if not math.isfinite(snr):
+        flags.append("no_pre_event_noise")
+    elif snr < args.min_pgd_snr:
+        flags.append("low_pgd_snr")
+    if args.quality_max_distance_km > 0 and distance_km > args.quality_max_distance_km:
+        flags.append("far_station")
+    if args.quality_max_pgd_time_offset > 0 and float(pgd["pgd_time_offset_s"]) > args.quality_max_pgd_time_offset:
+        flags.append("late_pgd_peak")
+    if float(pgd.get("noise_sample_count", 0.0)) < 30:
+        flags.append("short_noise_window")
+    return not flags, ",".join(flags)
+
+
 def fmt(value: object, digits: int = 6) -> str:
     if isinstance(value, int):
         return str(value)
@@ -259,9 +315,13 @@ def evaluate_event(event_dir: Path, args: argparse.Namespace) -> tuple[list[dict
         args.pgd_window_end,
         args.min_pgd_m,
         args.pgd_component,
+        args.noise_window_start,
+        args.noise_window_end,
     )
     station_rows: list[dict[str, object]] = []
     by_law: dict[str, list[float]] = defaultdict(list)
+    by_law_usable: dict[str, list[float]] = defaultdict(list)
+    station_metrics: dict[str, dict[str, object]] = {}
 
     for station, pgd in pgd_by_station.items():
         station_meta = stations.get(station)
@@ -277,12 +337,23 @@ def evaluate_event(event_dir: Path, args: argparse.Namespace) -> tuple[list[dict
             continue
         if args.max_pgd_time_offset > 0 and float(pgd["pgd_time_offset_s"]) > args.max_pgd_time_offset:
             continue
+        usable_for_pgd, quality_flags = station_quality_flags(pgd, distance_km, args)
+        near_station = distance_km <= args.near_distance_km
+        station_metrics[station] = {
+            "usable_for_pgd": usable_for_pgd,
+            "near_station": near_station,
+            "distance_km": distance_km,
+            "pgd_snr": pgd["pgd_snr"],
+            "quality_flags": quality_flags,
+        }
         for law in SCALING_LAWS:
             mw_estimate = estimate_magnitude(law, float(pgd["pgd_m"]), distance_km)
             if not math.isfinite(mw_estimate):
                 continue
             residual = mw_estimate - magnitude
             by_law[law.name].append(mw_estimate)
+            if usable_for_pgd:
+                by_law_usable[law.name].append(mw_estimate)
             station_rows.append(
                 {
                     "event_dir": event_dir.name,
@@ -303,6 +374,13 @@ def evaluate_event(event_dir: Path, args: argparse.Namespace) -> tuple[list[dict
                     "pgd_n_m": pgd["pgd_n_m"],
                     "pgd_u_m": pgd["pgd_u_m"],
                     "pgd_sample_count": int(pgd["pgd_sample_count"]),
+                    "pre_event_rms_m": pgd["pre_event_rms_m"],
+                    "pre_event_rms_cm": pgd["pre_event_rms_cm"],
+                    "noise_sample_count": int(pgd["noise_sample_count"]),
+                    "pgd_snr": pgd["pgd_snr"],
+                    "usable_for_pgd": "Y" if usable_for_pgd else "N",
+                    "station_reliability_flags": quality_flags,
+                    "near_station": "Y" if near_station else "N",
                     "formula": law.name,
                     "formula_pgd_unit": law.pgd_unit,
                     "pgd_component": args.pgd_component,
@@ -314,11 +392,23 @@ def evaluate_event(event_dir: Path, args: argparse.Namespace) -> tuple[list[dict
                 }
             )
 
+    usable_metrics = [metric for metric in station_metrics.values() if bool(metric["usable_for_pgd"])]
+    usable_count = len(usable_metrics)
+    near_count = sum(1 for metric in station_metrics.values() if bool(metric["near_station"]))
+    snrs = [float(metric["pgd_snr"]) for metric in usable_metrics if math.isfinite(float(metric["pgd_snr"]))]
+    distances = [float(metric["distance_km"]) for metric in station_metrics.values() if math.isfinite(float(metric["distance_km"]))]
+    median_snr = median(snrs)
+    median_distance = median(distances)
+    reliability = event_reliability(usable_count, median_snr)
+    reliability_flags = sorted({flag for metric in station_metrics.values() for flag in str(metric["quality_flags"]).split(",") if flag})
+
     event_rows: list[dict[str, object]] = []
     for law_name, estimates in by_law.items():
         if len(estimates) < args.min_stations:
             continue
         event_estimate = aggregate_station_estimates(estimates, args.station_aggregation, args.trim_fraction)
+        usable_estimates = by_law_usable.get(law_name, [])
+        usable_event_estimate = aggregate_station_estimates(usable_estimates, args.station_aggregation, args.trim_fraction)
         residuals = [value - magnitude for value in estimates]
         event_rows.append(
             {
@@ -334,11 +424,20 @@ def evaluate_event(event_dir: Path, args: argparse.Namespace) -> tuple[list[dict
                 "distance_mode": args.distance,
                 "station_aggregation": args.station_aggregation,
                 "station_count": len(estimates),
+                "usable_station_count": usable_count,
+                "near_station_count": near_count,
+                "median_pgd_snr": median_snr,
+                "median_distance_km": median_distance,
+                "pgd_reliability": reliability,
+                "reliability_flags": ",".join(reliability_flags),
                 "estimated_mw_median": event_estimate,
                 "estimated_mw_p16": percentile(estimates, 0.16),
                 "estimated_mw_p84": percentile(estimates, 0.84),
                 "residual_mw": event_estimate - magnitude,
                 "abs_residual_mw": abs(event_estimate - magnitude),
+                "usable_estimated_mw_median": usable_event_estimate,
+                "usable_residual_mw": usable_event_estimate - magnitude if math.isfinite(usable_event_estimate) else math.nan,
+                "usable_abs_residual_mw": abs(usable_event_estimate - magnitude) if math.isfinite(usable_event_estimate) else math.nan,
                 "station_residual_mean": mean(residuals),
                 "station_residual_rmse": rmse(residuals),
             }
@@ -349,51 +448,89 @@ def evaluate_event(event_dir: Path, args: argparse.Namespace) -> tuple[list[dict
 def write_table(path: Path, rows: list[dict[str, object]], fieldnames: list[str]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fieldnames, delimiter="\t", lineterminator="\n")
-        writer.writeheader()
+        writer = csv.writer(handle, delimiter="\t", lineterminator="\n")
+        writer.writerow(fieldnames)
         for row in rows:
-            writer.writerow({field: fmt(row.get(field), 6) if isinstance(row.get(field), float) else row.get(field, "") for field in fieldnames})
+            values = [fmt(row.get(field), 6) if isinstance(row.get(field), float) else row.get(field, "") for field in fieldnames]
+            while values and values[-1] == "":
+                values[-1] = "NA"
+            writer.writerow(values)
+
+
+def magnitude_bin(magnitude: float) -> str:
+    if 6.0 <= magnitude < 7.0:
+        return "6.0-7.0"
+    if 7.0 <= magnitude < 8.0:
+        return "7.0-8.0"
+    if magnitude >= 8.0:
+        return "8.0+"
+    return "<6.0"
+
+
+def summary_payload(rows: list[dict[str, object]], residual_field: str = "residual_mw") -> dict[str, object]:
+    residuals = [float(row[residual_field]) for row in rows if math.isfinite(finite_float(row.get(residual_field)))]
+    abs_residuals = [abs(value) for value in residuals]
+    return {
+        "event_count": len(rows),
+        "bias_mw": mean(residuals),
+        "mae_mw": mean(abs_residuals),
+        "rmse_mw": rmse(residuals),
+        "median_abs_error_mw": median(abs_residuals),
+    }
 
 
 def summarize(event_rows: list[dict[str, object]]) -> list[dict[str, object]]:
+    summary_rows: list[dict[str, object]] = []
     groups: dict[tuple[str, str], list[dict[str, object]]] = defaultdict(list)
     for row in event_rows:
         groups[(str(row["country"]), str(row["formula"]))].append(row)
-    groups[("ALL", "")]
-    summary_rows: list[dict[str, object]] = []
     for (country, formula), rows in sorted(groups.items()):
-        if not rows:
-            continue
-        residuals = [float(row["residual_mw"]) for row in rows]
-        abs_residuals = [abs(value) for value in residuals]
-        summary_rows.append(
-            {
-                "country": country,
-                "formula": formula,
-                "event_count": len(rows),
-                "bias_mw": mean(residuals),
-                "mae_mw": mean(abs_residuals),
-                "rmse_mw": rmse(residuals),
-                "median_abs_error_mw": median(abs_residuals),
-            }
-        )
-    formulas = sorted({str(row["formula"]) for row in event_rows})
-    for formula in formulas:
+        summary_rows.append({"country": country, "formula": formula, **summary_payload(rows)})
+    for formula in sorted({str(row["formula"]) for row in event_rows}):
         rows = [row for row in event_rows if row["formula"] == formula]
-        residuals = [float(row["residual_mw"]) for row in rows]
-        abs_residuals = [abs(value) for value in residuals]
-        summary_rows.append(
+        summary_rows.append({"country": "ALL", "formula": formula, **summary_payload(rows)})
+    return summary_rows
+
+
+def summarize_by_magnitude_bin(event_rows: list[dict[str, object]], quality_filtered: bool = False) -> list[dict[str, object]]:
+    groups: dict[tuple[str, str], list[dict[str, object]]] = defaultdict(list)
+    for row in event_rows:
+        if quality_filtered and row.get("pgd_reliability") not in {"HIGH", "MEDIUM"}:
+            continue
+        mag_bin = magnitude_bin(float(row["usgs_magnitude"]))
+        groups[(mag_bin, str(row["formula"]))].append(row)
+    return [
+        {"magnitude_bin": mag_bin, "formula": formula, "quality_filter": "HIGH_OR_MEDIUM" if quality_filtered else "ALL", **summary_payload(rows)}
+        for (mag_bin, formula), rows in sorted(groups.items())
+    ]
+
+
+def low_reliability_events(event_rows: list[dict[str, object]]) -> list[dict[str, object]]:
+    seen = set()
+    rows = []
+    for row in event_rows:
+        event_id = str(row["event_id"])
+        if event_id in seen or row.get("pgd_reliability") in {"HIGH", "MEDIUM"}:
+            continue
+        seen.add(event_id)
+        rows.append(
             {
-                "country": "ALL",
-                "formula": formula,
-                "event_count": len(rows),
-                "bias_mw": mean(residuals),
-                "mae_mw": mean(abs_residuals),
-                "rmse_mw": rmse(residuals),
-                "median_abs_error_mw": median(abs_residuals),
+                "event_id": event_id,
+                "event_time": row.get("event_time", ""),
+                "country": row.get("country", ""),
+                "place": row.get("place", ""),
+                "usgs_magnitude": row.get("usgs_magnitude", ""),
+                "magnitude_bin": magnitude_bin(float(row["usgs_magnitude"])),
+                "station_count": row.get("station_count", ""),
+                "usable_station_count": row.get("usable_station_count", ""),
+                "near_station_count": row.get("near_station_count", ""),
+                "median_pgd_snr": row.get("median_pgd_snr", ""),
+                "median_distance_km": row.get("median_distance_km", ""),
+                "pgd_reliability": row.get("pgd_reliability", ""),
+                "reliability_flags": row.get("reliability_flags", ""),
             }
         )
-    return summary_rows
+    return sorted(rows, key=lambda row: (str(row["magnitude_bin"]), str(row["country"]), str(row["event_id"])))
 
 
 def svg_escape(value: object) -> str:
@@ -537,6 +674,13 @@ def main() -> int:
         "pgd_n_m",
         "pgd_u_m",
         "pgd_sample_count",
+        "pre_event_rms_m",
+        "pre_event_rms_cm",
+        "noise_sample_count",
+        "pgd_snr",
+        "usable_for_pgd",
+        "station_reliability_flags",
+        "near_station",
         "formula",
         "formula_pgd_unit",
         "pgd_component",
@@ -559,11 +703,20 @@ def main() -> int:
         "distance_mode",
         "station_aggregation",
         "station_count",
+        "usable_station_count",
+        "near_station_count",
+        "median_pgd_snr",
+        "median_distance_km",
+        "pgd_reliability",
+        "reliability_flags",
         "estimated_mw_median",
         "estimated_mw_p16",
         "estimated_mw_p84",
         "residual_mw",
         "abs_residual_mw",
+        "usable_estimated_mw_median",
+        "usable_residual_mw",
+        "usable_abs_residual_mw",
         "station_residual_mean",
         "station_residual_rmse",
         "raw_estimated_mw_median",
@@ -575,18 +728,40 @@ def main() -> int:
         "full_sample_calibration_slope",
     ]
     summary_fields = ["country", "formula", "event_count", "bias_mw", "mae_mw", "rmse_mw", "median_abs_error_mw"]
+    bin_summary_fields = ["magnitude_bin", "formula", "quality_filter", "event_count", "bias_mw", "mae_mw", "rmse_mw", "median_abs_error_mw"]
+    low_reliability_fields = [
+        "event_id",
+        "event_time",
+        "country",
+        "place",
+        "usgs_magnitude",
+        "magnitude_bin",
+        "station_count",
+        "usable_station_count",
+        "near_station_count",
+        "median_pgd_snr",
+        "median_distance_km",
+        "pgd_reliability",
+        "reliability_flags",
+    ]
 
     raw_event_rows = event_rows
     raw_summary_rows = summarize(raw_event_rows)
     if args.calibration == "leave-one-out-country-linear":
         event_rows = apply_leave_one_out_calibration(raw_event_rows)
     summary_rows = summarize(event_rows)
+    bin_summary_rows = summarize_by_magnitude_bin(event_rows, quality_filtered=False)
+    filtered_bin_summary_rows = summarize_by_magnitude_bin(event_rows, quality_filtered=True)
+    low_reliability_rows = low_reliability_events(event_rows)
 
     write_table(args.out_root / "station_pgd_magnitude.tsv", station_rows, station_fields)
     write_table(args.out_root / "event_pgd_magnitude_raw.tsv", raw_event_rows, event_fields)
     write_table(args.out_root / "method_summary_raw.tsv", raw_summary_rows, summary_fields)
     write_table(args.out_root / "event_pgd_magnitude.tsv", event_rows, event_fields)
     write_table(args.out_root / "method_summary.tsv", summary_rows, summary_fields)
+    write_table(args.out_root / "method_summary_by_magnitude_bin.tsv", bin_summary_rows, bin_summary_fields)
+    write_table(args.out_root / "method_summary_quality_filtered_by_magnitude_bin.tsv", filtered_bin_summary_rows, bin_summary_fields)
+    write_table(args.out_root / "low_reliability_events.tsv", low_reliability_rows, low_reliability_fields)
     if event_rows:
         write_plots(event_rows, summary_rows, args.figure_root)
 
@@ -595,6 +770,9 @@ def main() -> int:
         "station_rows": len(station_rows),
         "summary_rows": len(summary_rows),
         "raw_summary_rows": len(raw_summary_rows),
+        "bin_summary_rows": len(bin_summary_rows),
+        "quality_filtered_bin_summary_rows": len(filtered_bin_summary_rows),
+        "low_reliability_events": len(low_reliability_rows),
         "calibration": args.calibration,
         "out_root": str(args.out_root),
         "figure_root": str(args.figure_root),
@@ -604,6 +782,10 @@ def main() -> int:
         "station_aggregation": args.station_aggregation,
         "max_distance_km": args.max_distance_km,
         "max_pgd_time_offset": args.max_pgd_time_offset,
+        "min_pgd_snr": args.min_pgd_snr,
+        "near_distance_km": args.near_distance_km,
+        "quality_max_distance_km": args.quality_max_distance_km,
+        "quality_max_pgd_time_offset": args.quality_max_pgd_time_offset,
         "countries": sorted(countries),
     }
     print(json.dumps(payload, indent=2, ensure_ascii=False))

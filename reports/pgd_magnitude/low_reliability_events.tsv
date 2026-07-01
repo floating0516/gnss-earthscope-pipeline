@@ -1,0 +1,72 @@
+event_id	event_time	country	place	usgs_magnitude	magnitude_bin	station_count	usable_station_count	near_station_count	median_pgd_snr	median_distance_km	pgd_reliability	reliability_flags
+us100047zq	2015-12-17T19:49:53.050Z	Mexico	4 km W of Manuel Ávila Camacho (Ponte Duro), Mexico	6.600000	6.0-7.0	1	0	1		199.126305	UNUSABLE	late_pgd_peak,low_pgd_snr
+us2000atjv	2017-09-23T12:53:01.480Z	Mexico	7 km NNE of Ixtepec, Mexico	6.100000	6.0-7.0	3	0	3		186.071908	UNUSABLE	late_pgd_peak,low_pgd_snr
+us2000cl83	2018-01-19T16:17:44.720Z	Mexico	79 km NNE of Loreto, Mexico	6.300000	6.0-7.0	2	1	2	4.358480	251.064011	LOW	late_pgd_peak
+us6000pjig	2025-01-12T08:32:49.944Z	Mexico	18 km SE of Aquila, Mexico	6.200000	6.0-7.0	10	1	10	3.165269	166.797589	LOW	late_pgd_peak,low_pgd_snr
+us7000ia36	2022-09-22T06:16:09.459Z	Mexico	55 km SSW of Aguililla, Mexico	6.800000	6.0-7.0	8	0	8		210.665754	UNUSABLE	late_pgd_peak,low_pgd_snr
+us7000imgl	2022-11-04T10:02:46.346Z	Mexico	82 km SSW of Bahía de Kino, Mexico	6.100000	6.0-7.0	1	0	1		166.646307	UNUSABLE	low_pgd_snr
+us7000kfnc	2023-07-14T09:29:00.404Z	Mexico	Offshore Chiapas, Mexico	6.300000	6.0-7.0	1	0	1		242.607266	UNUSABLE	low_pgd_snr
+us7000rm3k	2026-01-02T13:58:15.741Z	Mexico	0 km W of San Marcos, Mexico	6.500000	6.0-7.0	1	0	1		207.017029	UNUSABLE	low_pgd_snr
+ak0149guzic1	2014-07-25T10:54:50.417000Z	United States	40 km WNW of Elfin Cove, Alaska	6.000000	6.0-7.0	3	2	3	3.168473	142.068380	LOW	late_pgd_peak
+ak0156uj8rk3	2015-05-29T07:00:09.634000Z	United States	117 km SSE of Ugashik, Alaska	6.800000	6.0-7.0	5	2	5	3.234172	150.082964	LOW	low_pgd_snr
+ak0159nc9dk8	2015-07-29T02:35:59.449000Z	United States	52 km ENE of Pedro Bay, Alaska	6.400000	6.0-7.0	24	0	24		140.080694	UNUSABLE	late_pgd_peak,low_pgd_snr
+ak01649w95tp	2016-04-02T05:50:00.932000Z	United States	42 km E of Port Heiden, Alaska	6.200000	6.0-7.0	3	0	3		66.776295	UNUSABLE	late_pgd_peak,low_pgd_snr
+ak018aap2cqu	2018-08-12T14:58:53.503000Z	United States	89 km SW of Kaktovik, Alaska	6.400000	6.0-7.0	2	0	2		185.025607	UNUSABLE	late_pgd_peak,low_pgd_snr
+ak018aasz24z	2018-08-12T21:15:00.999000Z	United States	73 km SSW of Kaktovik, Alaska	6.000000	6.0-7.0	2	0	2		215.380665	UNUSABLE	low_pgd_snr
+ak0216xu2rod	2021-05-31T06:59:55.581000Z	United States	73 km N of Chickaloon, Alaska	6.100000	6.0-7.0	13	2	13	3.505839	128.997016	LOW	late_pgd_peak,low_pgd_snr
+ak021d1u1nos	2021-10-11T09:10:25.147000Z	United States	112 km E of Chignik, Alaska	6.900000	6.0-7.0	1	0	1		171.713324	UNUSABLE	late_pgd_peak,low_pgd_snr
+ak2025xjbvhj	2025-11-27T17:11:29.059000Z	United States	12 km WNW of Susitna, Alaska	6.000000	6.0-7.0	7	0	7		124.429892	UNUSABLE	late_pgd_peak,low_pgd_snr
+hv72748782	2021-10-10T21:48:36.560000Z	United States	27 km SSE of Naalehu, Hawaii	6.210000	6.0-7.0	4	0	4		77.422160	UNUSABLE	late_pgd_peak,low_pgd_snr
+nc71338066	2010-01-10T00:27:39.320000Z	United States	The 2010 Eureka, California Earthquake	6.500000	6.0-7.0	1	0	1		47.863806	UNUSABLE	late_pgd_peak,low_pgd_snr
+nc73666231	2021-12-20T20:10:31.310000Z	United States	7km N of Petrolia, CA	6.200000	6.0-7.0	4	1	4	3.316799	33.502648	LOW	late_pgd_peak,low_pgd_snr
+pr2019267000	2019-09-24T03:23:40.000000Z	United States	67 km NNW of San Antonio, Puerto Rico	6.000000	6.0-7.0	9	0	9		133.485101	UNUSABLE	late_pgd_peak,low_pgd_snr
+us10003vyx	2015-11-09T16:03:46.070000Z	United States	99 km SE of Atka, Alaska	6.500000	6.0-7.0	1	0	1		101.241372	UNUSABLE	late_pgd_peak,low_pgd_snr
+us10004x1w	2016-03-12T18:06:44.760000Z	United States	72 km SSE of Atka, Alaska	6.300000	6.0-7.0	1	0	1		76.318904	UNUSABLE	late_pgd_peak
+us10008mel	2017-05-01T12:31:55.590000Z	United States	47 km NW of Mosquito Lake, Alaska	6.200000	6.0-7.0	4	1	4	3.032472	157.649446	LOW	late_pgd_peak,low_pgd_snr
+us10008mgu	2017-05-01T14:18:15.290000Z	United States	48 km NW of Mosquito Lake, Alaska	6.300000	6.0-7.0	4	0	4		158.188678	UNUSABLE	late_pgd_peak,low_pgd_snr
+us1000ga0z	2018-08-15T21:56:56.310000Z	United States	108 km WSW of Adak, Alaska	6.500000	6.0-7.0	1	0	1		166.055410	UNUSABLE	low_pgd_snr
+us1000gf8u	2018-08-22T09:31:45.530000Z	United States	272 km W of Bandon, Oregon	6.200000	6.0-7.0	4	0	4		276.510417	UNUSABLE	late_pgd_peak,low_pgd_snr
+us1000gfvg	2018-08-23T03:35:12.270000Z	United States	97 km SW of Adak, Alaska	6.300000	6.0-7.0	1	0	1		263.340571	UNUSABLE	late_pgd_peak,low_pgd_snr
+us200030aq	2015-07-27T04:49:46.400000Z	United States	Fox Islands, Aleutian Islands, Alaska	6.900000	6.0-7.0	1	0	1		82.466269	UNUSABLE	late_pgd_peak,low_pgd_snr
+us20003hq5	2015-09-10T10:26:44.810000Z	United States	104 km SSW of Nikolski, Alaska	6.000000	6.0-7.0	1	0	1		109.179477	UNUSABLE	late_pgd_peak,low_pgd_snr
+us20005axu	2016-03-19T01:35:12.170000Z	United States	75 km S of Atka, Alaska	6.000000	6.0-7.0	1	0	1		79.244937	UNUSABLE	late_pgd_peak,low_pgd_snr
+us20007z6r	2016-12-08T14:49:45.910000Z	United States	164 km W of Ferndale, California	6.600000	6.0-7.0	3	0	3		183.119066	UNUSABLE	late_pgd_peak,low_pgd_snr
+us2000izcv	2018-12-31T02:35:37.670000Z	United States	87 km SE of King Cove, Alaska	6.000000	6.0-7.0	1	0	1		135.317756	UNUSABLE	late_pgd_peak,low_pgd_snr
+us60003r2r	2019-05-23T08:45:17.746000Z	United States	127 km WSW of Adak, Alaska	6.000000	6.0-7.0	1	1	1	3.470618	296.662772	LOW	NA
+us60007djn	2020-01-23T05:53:02.618000Z	United States	84 km W of Adak, Alaska	6.200000	6.0-7.0	3	1	3	3.545540	207.523077	LOW	late_pgd_peak,low_pgd_snr
+us6000b56k	2020-07-28T08:03:43.215000Z	United States	75 km SW of Sand Point, Alaska	6.100000	6.0-7.0	4	0	4		137.137239	UNUSABLE	late_pgd_peak,low_pgd_snr
+us6000f652	2021-08-14T11:57:43.447000Z	United States	125 km SE of Perryville, Alaska	6.900000	6.0-7.0	1	0	1		131.528481	UNUSABLE	low_pgd_snr
+us6000mzme	2024-05-19T09:35:24.660000Z	United States	169 km SW of Nikolski, Alaska	6.000000	6.0-7.0	1	1	1	3.585516	173.871350	LOW	NA
+us6000sayv	2026-02-23T05:11:48.410000Z	United States	96 km SW of Nikolski, Alaska	6.000000	6.0-7.0	2	0	2		190.719927	UNUSABLE	late_pgd_peak,low_pgd_snr
+us700059qh	2019-08-29T15:07:58.646000Z	United States	285 km W of Bandon, Oregon	6.300000	6.0-7.0	2	0	2		289.470313	UNUSABLE	late_pgd_peak,low_pgd_snr
+us70008jr5	2020-03-31T23:52:30.781000Z	United States	Stanley, Idaho	6.500000	6.0-7.0	11	1	11	4.068630	130.962470	LOW	late_pgd_peak,low_pgd_snr
+us7000asx4	2020-07-22T06:16:18.627000Z	United States	101 km ESE of Sand Point, Alaska	6.100000	6.0-7.0	5	0	5		101.866124	UNUSABLE	late_pgd_peak,low_pgd_snr
+us7000clnv	2020-12-01T16:22:39.923000Z	United States	46 km ESE of Nikolski, Alaska	6.400000	6.0-7.0	2	0	2		111.301898	UNUSABLE	late_pgd_peak,low_pgd_snr
+us7000gavu	2022-01-11T11:35:43.674000Z	United States	100 km SE of Nikolski, Alaska	6.800000	6.0-7.0	1	0	1		103.879488	UNUSABLE	late_pgd_peak
+us7000gawk	2022-01-11T12:39:32.454000Z	United States	53 km SE of Nikolski, Alaska	6.600000	6.0-7.0	1	0	1		59.276557	UNUSABLE	late_pgd_peak
+us7000ge5q	2022-01-22T05:17:04.896000Z	United States	71 km S of Unalaska, Alaska	6.200000	6.0-7.0	1	0	1		150.911609	UNUSABLE	late_pgd_peak,low_pgd_snr
+us7000n068	2024-07-19T03:13:47.417000Z	United States	168 km SW of Nikolski, Alaska	6.000000	6.0-7.0	1	0	1		175.253652	UNUSABLE	late_pgd_peak
+us7000np33	2024-10-30T20:15:20.095000Z	United States	267 km W of Bandon, Oregon	6.000000	6.0-7.0	6	0	6		283.028384	UNUSABLE	late_pgd_peak,low_pgd_snr
+us7000nx3z	2024-12-08T19:57:08.602000Z	United States	108 km SSW of Adak, Alaska	6.300000	6.0-7.0	2	0	2		173.594380	UNUSABLE	late_pgd_peak,low_pgd_snr
+us7000pllu	2025-03-21T14:53:41.774000Z	United States	88 km SSE of Adak, Alaska	6.200000	6.0-7.0	1	0	1		174.798630	UNUSABLE	low_pgd_snr
+us7000qe51	2025-07-20T22:28:00.041000Z	United States	91 km SSE of Sand Point, Alaska	6.200000	6.0-7.0	6	1	6	3.335370	129.388853	LOW	low_pgd_snr
+us7000rq0d	2026-01-16T03:25:53.034000Z	United States	off the coast of Oregon	6.000000	6.0-7.0	1	0	1		298.434588	UNUSABLE	low_pgd_snr
+usb000je9f	2013-08-31T06:38:36.350000Z	United States	118 km SSW of Atka, Alaska	6.000000	6.0-7.0	1	0	1		120.665112	UNUSABLE	low_pgd_snr
+usb000jgju	2013-09-04T02:32:30.600000Z	United States	81 km SSW of Atka, Alaska	6.500000	6.0-7.0	1	0	1		84.550499	UNUSABLE	low_pgd_snr
+usb000jguz	2013-09-04T06:27:03.560000Z	United States	82 km SSW of Atka, Alaska	6.000000	6.0-7.0	1	0	1		85.328600	UNUSABLE	low_pgd_snr
+usb000rtp6	2014-07-17T11:49:33.930000Z	United States	90 km NNW of Yakutat, Alaska	6.000000	6.0-7.0	2	0	2		125.223872	UNUSABLE	low_pgd_snr
+usc000juwv	2013-09-15T16:21:37.150000Z	United States	77 km SSW of Atka, Alaska	6.100000	6.0-7.0	1	1	1	4.356421	82.363350	LOW	NA
+usc000m1w9	2014-01-13T04:01:03.240000Z	United States	61 km N of Hatillo, Puerto Rico	6.400000	6.0-7.0	2	1	2	3.530379	100.547211	LOW	late_pgd_peak
+usc000myqq	2014-02-26T21:13:40.110000Z	United States	210 km WNW of Nikolski, Alaska	6.100000	6.0-7.0	2	0	0		341.957951	UNUSABLE	late_pgd_peak,low_pgd_snr
+usp000jhpg	2012-04-11T22:41:46.040000Z	United States	266 km W of Bandon, Oregon	6.000000	6.0-7.0	5	1	5	3.824915	273.933841	LOW	late_pgd_peak,low_pgd_snr
+usp000jt0h	2012-09-26T23:39:55.110000Z	United States	118 km WSW of Adak, Alaska	6.400000	6.0-7.0	2	1	2	3.387881	203.414509	LOW	low_pgd_snr
+usp000jwyb	2012-12-14T10:36:01.590000Z	United States	279 km SSW of Avalon, California	6.300000	6.0-7.0	2	0	2		282.097317	UNUSABLE	late_pgd_peak,low_pgd_snr
+us2000ar20	2017-09-19T18:14:38.090Z	Mexico	1 km S of Matzaco, Mexico	7.100000	7.0-8.0	7	1	7	5.225264	190.608775	LOW	late_pgd_peak,low_pgd_snr
+us2000d3km	2018-02-16T23:39:39.280Z	Mexico	4 km S of Pinotepa de Don Luis, Mexico	7.200000	7.0-8.0	9	2	9	7.631628	140.889261	LOW	late_pgd_peak,low_pgd_snr
+us7000f93v	2021-09-08T01:47:47.437Z	Mexico	Acapulco, Mexico	7.000000	7.0-8.0	6	2	6	3.838811	272.839539	LOW	late_pgd_peak,low_pgd_snr
+ak0138esnzr	2013-01-05T08:58:14.957000Z	United States	110 km SW of Edna Bay, Alaska	7.500000	7.0-8.0	2	2	2	9.012014	163.348518	LOW	NA
+ak01613v15nv	2016-01-24T10:30:29.557000Z	United States	47 km ESE of Pedro Bay, Alaska	7.100000	7.0-8.0	17	2	17	4.447339	150.095796	LOW	late_pgd_peak,low_pgd_snr
+us6000rsy1	2025-12-06T20:41:49.288000Z	United States	2025 Hubbard Glacier Earthquake	7.000000	7.0-8.0	1	0	1		255.862088	UNUSABLE	late_pgd_peak,low_pgd_snr
+us7000kg30	2023-07-16T06:48:21.158000Z	United States	2023 Sand Point, Alaska Earthquake	7.200000	7.0-8.0	7	2	7	4.553589	128.631800	LOW	late_pgd_peak,low_pgd_snr
+usb000jdt7	2013-08-30T16:25:02.300000Z	United States	101 km SW of Atka, Alaska	7.000000	7.0-8.0	1	0	1		106.691872	UNUSABLE	low_pgd_snr
+us2000ahv0	2017-09-08T04:49:19.180Z	Mexico	2017 Tehuantepec, Mexico Earthquake	8.200000	8.0+	2	2	2	9.889718	264.143158	LOW	NA

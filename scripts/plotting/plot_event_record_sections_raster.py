@@ -19,6 +19,7 @@ import datetime as dt
 import math
 import sqlite3
 import statistics
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -28,12 +29,16 @@ from matplotlib.colors import LinearSegmentedColormap, TwoSlopeNorm
 
 
 ROOT = Path(__file__).resolve().parents[2]
+QUALITY_DIR = ROOT / "scripts" / "quality"
+if str(QUALITY_DIR) not in sys.path:
+    sys.path.insert(0, str(QUALITY_DIR))
+
+from compute_kin_quality import mjd_sod_to_utc
+
 DEFAULT_RUNS_ROOT = ROOT / "runs"
 DEFAULT_DB = ROOT / "data" / "earthscope_availability" / "earthscope_1hz.sqlite"
 DEFAULT_FIGURE_ROOT = ROOT / "figure" / "record_section"
 
-MJD_UNIX_EPOCH = 40587
-SECONDS_PER_DAY = 86400
 COMPONENTS = ("East", "North", "Vertical")
 
 
@@ -96,11 +101,6 @@ def parse_utc(value: str) -> dt.datetime:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=dt.timezone.utc)
     return parsed.astimezone(dt.timezone.utc)
-
-
-def mjd_sod_to_utc(mjd: int, sod: float) -> dt.datetime:
-    seconds = (mjd - MJD_UNIX_EPOCH) * SECONDS_PER_DAY + sod
-    return dt.datetime.fromtimestamp(seconds, tz=dt.timezone.utc)
 
 
 def read_key_value_tsv(path: Path) -> dict[str, str]:
