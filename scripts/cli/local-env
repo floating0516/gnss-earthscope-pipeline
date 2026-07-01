@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+CONDA_ENV="${ROOT}/external/conda-envs/pride-build"
+export PATH="${ROOT}/.venv/bin:${ROOT}/external/bin:${CONDA_ENV}/bin:${PATH}"
+export HOME="${ROOT}/docker-home"
+export LD_LIBRARY_PATH="${CONDA_ENV}/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+export GMT_LIBRARY_PATH="${CONDA_ENV}/lib"
+
+exec "$@"

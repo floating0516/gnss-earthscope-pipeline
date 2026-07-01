@@ -1,0 +1,22 @@
+.git
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Large mutable project data is bind-mounted at runtime, not baked into the image.
+data/
+runs/
+exports/
+figure/
+reports/
+external/
+docker-home/
+
+# Local/editor files.
+.env
+.env.*
+.DS_Store

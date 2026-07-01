@@ -1,0 +1,20 @@
+services:
+  gnss-eq:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: gnss-earthscope-pipeline:local
+    working_dir: /workspace/gnss-earthscope-pipeline
+    user: "1000:1000"
+    environment:
+      PATH: /home/gnss/.local/bin:/opt/external/bin:/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin
+      PRIDE_BIN_DIR: /opt/external/bin
+      LOCAL_BIN_DIR: /opt/external/bin
+      HOME: /home/gnss
+    volumes:
+      - .:/workspace/gnss-earthscope-pipeline
+      - ./external/bin:/opt/external/bin:ro
+      - ./docker-home:/home/gnss
+    stdin_open: true
+    tty: true
+    command: bash -c "pip install --user -e . && exec bash"
