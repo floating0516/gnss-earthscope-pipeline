@@ -22,9 +22,15 @@ REQUIRED_COMMANDS = ("bash", "python3", "timeout", "curl", "jq", "grep", "gunzip
 REQUIRED_SCRIPTS = (
     ("run-batch script", SCRIPTS / "workflows" / "run_event_batch_workflow.sh"),
     ("run-event script", SCRIPTS / "workflows" / "run_event_1hz_pride_workflow.sh"),
+    ("summary updater script", SCRIPTS / "workflows" / "update_workflow_summary_status.py"),
+    ("batch summary builder script", SCRIPTS / "workflows" / "build_event_batch_summary.py"),
     ("downloader script", DOWNLOADER_TOOLS / "download_earthscope_default.sh"),
     ("rinex3 downloader script", DOWNLOADER_TOOLS / "download_earthscope_rinex3.sh"),
     ("PRIDE processor script", PRIDE_TOOLS / "process_event_window.sh"),
+    ("PRIDE cleaner script", PRIDE_TOOLS / "cleanup_pride_workdir.sh"),
+    ("quality script", SCRIPTS / "quality" / "compute_kin_quality.py"),
+    ("normalizer script", SCRIPTS / "normalize" / "normalize_pride_kin_event.py"),
+    ("final plotter script", SCRIPTS / "plotting" / "plot_completed_normalized_event.py"),
 )
 
 
@@ -83,7 +89,9 @@ def command_checks(env: dict[str, str]) -> list[CheckResult]:
 def script_checks() -> list[CheckResult]:
     results = []
     for name, path in REQUIRED_SCRIPTS:
-        if path.is_file() and os.access(path, os.X_OK):
+        if path.suffix == ".py" and path.is_file():
+            results.append(CheckResult("OK", name, str(path)))
+        elif path.is_file() and os.access(path, os.X_OK):
             results.append(CheckResult("OK", name, str(path)))
         elif path.exists():
             results.append(CheckResult("FAIL", name, f"not executable: {path}"))

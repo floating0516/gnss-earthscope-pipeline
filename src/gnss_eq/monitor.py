@@ -22,6 +22,9 @@ MONITOR_FIELDS = [
     "medium",
     "low",
     "workflow_done",
+    "workflow_attempted",
+    "workflow_normalized_ok",
+    "failed_retryable",
     "collected_normalized",
     "both",
     "priority",
@@ -38,6 +41,9 @@ MONITOR_FIELDS = [
 STATUS_KEYS = {
     "MISSING": "missing",
     "WORKFLOW_DONE": "workflow_done",
+    "WORKFLOW_ATTEMPTED": "workflow_attempted",
+    "WORKFLOW_NORMALIZED_OK": "workflow_normalized_ok",
+    "FAILED_RETRYABLE": "failed_retryable",
     "COLLECTED_NORMALIZED": "collected_normalized",
     "BOTH": "both",
 }
@@ -79,20 +85,59 @@ def workflow_event_ids(runs_root: Path) -> set[str]:
     }
 
 
-def coverage_status(event: dict[str, Any], workflow_ids: set[str]) -> str:
-    has_workflow = str(event.get("event_id", "")) in workflow_ids
+def workflow_status_by_event(runs_root: Path) -> dict[str, dict[str, Any]]:
+    statuses: dict[str, dict[str, Any]] = {}
+    if not runs_root.exists():
+        return statuses
+
+    failing_values = {
+        "FAIL",
+        "BLOCKED_OBS_VALIDATION",
+        "SKIPPED_NO_KIN",
+        "SKIPPED_WORKFLOW_FAILED",
+        "SKIPPED_QUALITY_FAIL",
+    }
+    for summary in sorted(runs_root.glob("*/workflow-*/reports/workflow-summary.json")):
+        event_id = summary.parts[-4]
+        try:
+            payload = json.loads(summary.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            statuses[event_id] = {"state": "WORKFLOW_ATTEMPTED", "summary_json": str(summary)}
+            continue
+        if not isinstance(payload, dict):
+            statuses[event_id] = {"state": "WORKFLOW_ATTEMPTED", "summary_json": str(summary)}
+            continue
+        status = payload.get("status", {})
+        status = status if isinstance(status, dict) else {}
+        normalized = str(status.get("normalized") or "")
+        if normalized == "OK":
+            state = "WORKFLOW_NORMALIZED_OK"
+        elif any(str(status.get(key) or "") in failing_values for key in ["download", "obs_validation", "process", "quality", "normalized"]):
+            state = "FAILED_RETRYABLE"
+        else:
+            state = "WORKFLOW_ATTEMPTED"
+        statuses[event_id] = {"state": state, "summary_json": str(summary), "status": status}
+    return statuses
+
+
+def coverage_status(event: dict[str, Any], workflow_statuses: dict[str, dict[str, Any]] | set[str]) -> str:
+    event_id = str(event.get("event_id", ""))
+    if isinstance(workflow_statuses, set):
+        workflow_state = "WORKFLOW_DONE" if event_id in workflow_statuses else ""
+    else:
+        workflow_state = str(workflow_statuses.get(event_id, {}).get("state") or "")
     has_collected = event.get("existing_data_status") == "HAS_NORMALIZED"
-    if has_workflow and has_collected:
+    if has_collected and workflow_state in {"WORKFLOW_DONE", "WORKFLOW_NORMALIZED_OK"}:
         return "BOTH"
-    if has_workflow:
-        return "WORKFLOW_DONE"
     if has_collected:
         return "COLLECTED_NORMALIZED"
+    if workflow_state:
+        return workflow_state
     return "MISSING"
 
 
 def event_priority(event: dict[str, Any], status: str) -> str:
-    if status != "MISSING":
+    if status not in {"MISSING", "FAILED_RETRYABLE"}:
         return "SKIP"
     stations_200km = int(event.get("stations_200km", 0) or 0)
     if stations_200km >= 20:
@@ -121,6 +166,9 @@ def _empty_counts() -> dict[str, int]:
         "medium": 0,
         "low": 0,
         "workflow_done": 0,
+        "workflow_attempted": 0,
+        "workflow_normalized_ok": 0,
+        "failed_retryable": 0,
         "collected_normalized": 0,
         "both": 0,
     }
@@ -228,10 +276,10 @@ def list_geonet_events(geonet_db: Path) -> dict[str, Any]:
     return {"source": "geonet", "ok": True, "db": _display_path(geonet_db), "events": events, "count": len(events)}
 
 
-def _decorate_events(events: list[dict[str, Any]], workflow_ids: set[str]) -> list[dict[str, Any]]:
+def _decorate_events(events: list[dict[str, Any]], workflow_statuses: dict[str, dict[str, Any]] | set[str]) -> list[dict[str, Any]]:
     decorated = []
     for event in events:
-        current_status = coverage_status(event, workflow_ids)
+        current_status = coverage_status(event, workflow_statuses)
         priority = event_priority(event, current_status)
         decorated.append({**event, "coverage_status": current_status, "priority": priority})
     decorated.sort(key=lambda event: str(event.get("event_id") or ""), reverse=True)
@@ -241,7 +289,7 @@ def _decorate_events(events: list[dict[str, Any]], workflow_ids: set[str]) -> li
     return decorated
 
 
-def _source_report(source_result: dict[str, Any], workflow_ids: set[str], limit: int) -> dict[str, Any]:
+def _source_report(source_result: dict[str, Any], workflow_statuses: dict[str, dict[str, Any]] | set[str], limit: int) -> dict[str, Any]:
     if not source_result["ok"]:
         return {
             "source": source_result["source"],
@@ -252,7 +300,7 @@ def _source_report(source_result: dict[str, Any], workflow_ids: set[str], limit:
             "candidates": [],
         }
 
-    events = _decorate_events(source_result.get("events", []), workflow_ids)
+    events = _decorate_events(source_result.get("events", []), workflow_statuses)
     counts = _empty_counts()
     counts["total"] = len(events)
     for event in events:
@@ -263,7 +311,7 @@ def _source_report(source_result: dict[str, Any], workflow_ids: set[str], limit:
         if priority in {"high", "medium", "low"}:
             counts[priority] += 1
 
-    candidates = [event for event in events if event.get("coverage_status") == "MISSING"][:limit]
+    candidates = [event for event in events if event.get("coverage_status") in {"MISSING", "FAILED_RETRYABLE"}][:limit]
     report = {
         "source": source_result["source"],
         "ok": True,
@@ -290,14 +338,14 @@ def build_monitor_report(
     if limit < 1:
         raise ValueError("limit must be a positive integer")
 
-    workflow_ids = workflow_event_ids(runs_root)
+    workflow_statuses = workflow_status_by_event(runs_root)
     source_results = []
     if source in {"all", "earthscope"}:
         source_results.append(list_earthscope_events(earthscope_db, earthscope_nonconus_db))
     if source in {"all", "geonet"}:
         source_results.append(list_geonet_events(geonet_db))
 
-    sources = [_source_report(result, workflow_ids, limit) for result in source_results]
+    sources = [_source_report(result, workflow_statuses, limit) for result in source_results]
     return {
         "ok": all(result["ok"] for result in sources),
         "read_only": True,

@@ -64,6 +64,40 @@ class CliWorkflowCommandTest(unittest.TestCase):
         self.assertIn("--verified-files-db", command)
         self.assertTrue(command[command.index("--verified-files-db") + 1].endswith("data/earthscope_availability/earthscope_nonconus_1hz.sqlite"))
 
+    def test_run_batch_forwards_cleanup_disable_flags(self):
+        args = argparse.Namespace(
+            csv="data/batches/example.csv",
+            state_csv=None,
+            timeout="120",
+            hours="3",
+            interval="1",
+            run_root="runs",
+            obs_root="data/obs",
+            normalize_db="data/earthscope_availability/earthscope_1hz.sqlite",
+            verified_files_db="",
+            post_seconds="200",
+            process_jobs=1,
+            summary=None,
+            max_stations="0",
+            skip_download=False,
+            force_download=False,
+            no_allow_partial=False,
+            skip_process=False,
+            skip_plot=False,
+            cleanup_downloads=False,
+            cleanup_pride_workdir=False,
+            cleanup_obs=False,
+            rerun_ok=False,
+            dry_run=False,
+        )
+        with patch.object(cli, "run_command", return_value=0) as run_command:
+            self.assertEqual(cli.cmd_run_batch(args), 0)
+
+        command = run_command.call_args.args[0]
+        self.assertIn("--no-cleanup-downloads", command)
+        self.assertIn("--no-cleanup-pride-workdir", command)
+        self.assertIn("--no-cleanup-obs", command)
+
 
 def create_monitor_earthscope_db(path: Path, event_table: str = "usgs_m6plus_events_usa") -> None:
     conn = sqlite3.connect(path)
@@ -200,12 +234,17 @@ class CliMonitorCommandTest(unittest.TestCase):
         self.assertIn("ERROR\tgeonet\tFalse", text)
         self.assertIn("DATABASE_NOT_FOUND", text)
 
-    def test_monitor_marks_workflow_done_from_runs_root(self):
+    def test_monitor_marks_normalized_workflow_from_latest_summary(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             db = root / "earthscope.sqlite"
             create_monitor_earthscope_db(db)
-            (root / "runs" / "event-a" / "workflow-test").mkdir(parents=True)
+            report_dir = root / "runs" / "event-a" / "workflow-test" / "reports"
+            report_dir.mkdir(parents=True)
+            (report_dir / "workflow-summary.json").write_text(
+                json.dumps({"status": {"normalized": "OK"}}),
+                encoding="utf-8",
+            )
             output = io.StringIO()
             with redirect_stdout(output):
                 rc = cli.main(
@@ -226,7 +265,7 @@ class CliMonitorCommandTest(unittest.TestCase):
 
         report = json.loads(output.getvalue())
         self.assertEqual(rc, 0)
-        self.assertEqual(report["sources"][0]["counts"]["workflow_done"], 1)
+        self.assertEqual(report["sources"][0]["counts"]["workflow_normalized_ok"], 1)
         self.assertEqual(report["sources"][0]["counts"]["missing"], 0)
         self.assertEqual(report["sources"][0]["candidates"], [])
 

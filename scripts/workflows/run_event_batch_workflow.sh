@@ -40,6 +40,9 @@ Forwarded workflow options:
   --cleanup-downloads       Remove raw downloader intermediates after successful event workflow (default: on)
   --cleanup-pride-workdir   Remove bulky reproducible PRIDE workdir files after each event workflow (default: on)
   --cleanup-obs             Remove data/obs/<event-id> files after successful kin generation (default: on)
+  --no-cleanup-downloads    Preserve raw downloader intermediates
+  --no-cleanup-pride-workdir Preserve bulky reproducible PRIDE workdir files
+  --no-cleanup-obs          Preserve data/obs/<event-id> files
   -h, --help                Show this help
 
 Status behavior:
@@ -61,6 +64,27 @@ done
 
 absolute_path() {
   realpath -m -- "$1"
+}
+
+portable_path() {
+  local path="$1"
+  local abs=""
+  if [[ -z "$path" ]]; then
+    printf '\n'
+    return
+  fi
+  abs="$(realpath -m -- "$path")"
+  case "$abs" in
+    "$PIPELINE_ROOT")
+      printf '@ROOT@\n'
+      ;;
+    "$PIPELINE_ROOT"/*)
+      printf '@ROOT@/%s\n' "${abs#"$PIPELINE_ROOT"/}"
+      ;;
+    *)
+      printf '%s\n' "$abs"
+      ;;
+  esac
 }
 
 CSV_FILE=""
@@ -162,12 +186,24 @@ while [[ $# -gt 0 ]]; do
       CLEANUP_DOWNLOADS="1"
       shift
       ;;
+    --no-cleanup-downloads)
+      CLEANUP_DOWNLOADS="0"
+      shift
+      ;;
     --cleanup-pride-workdir)
       CLEANUP_PRIDE_WORKDIR="1"
       shift
       ;;
+    --no-cleanup-pride-workdir)
+      CLEANUP_PRIDE_WORKDIR="0"
+      shift
+      ;;
     --cleanup-obs)
       CLEANUP_OBS="1"
+      shift
+      ;;
+    --no-cleanup-obs)
+      CLEANUP_OBS="0"
       shift
       ;;
     --rerun-ok)
@@ -230,7 +266,7 @@ if [[ -n "$VERIFIED_FILES_DB" ]]; then
 fi
 SUMMARY_FILE="$(absolute_path "$SUMMARY_FILE")"
 
-export CSV_FILE SUMMARY_FILE RUN_ROOT RERUN_OK DRY_RUN EXISTING_DB INCLUDE_EXISTING
+export CSV_FILE SUMMARY_FILE RUN_ROOT RERUN_OK DRY_RUN EXISTING_DB INCLUDE_EXISTING PIPELINE_ROOT
 
 python3 - <<'PY'
 import csv
@@ -414,90 +450,11 @@ PY
 }
 
 write_batch_summary() {
-  python3 - <<'PY'
-import csv
-import glob
-import json
-import os
-from pathlib import Path
-
-csv_path = Path(os.environ["CSV_FILE"])
-summary_path = Path(os.environ["SUMMARY_FILE"])
-run_root = Path(os.environ["RUN_ROOT"])
-
-fields = [
-    "event_id",
-    "event_time",
-    "batch_status",
-    "download_status",
-    "obs_validation_status",
-    "process_status",
-    "plot_status",
-    "quality_status",
-    "quality_ok_stations",
-    "quality_warn_stations",
-    "quality_fail_stations",
-    "cleanup_status",
-    "pride_cleanup_status",
-    "obs_cleanup_status",
-    "requested_stations",
-    "obs_files",
-    "kin_files",
-    "plot_files",
-    "duration_seconds",
-    "workflow_dir",
-    "summary_json",
-]
-
-rows_out = []
-with csv_path.open(newline="") as handle:
-    for row in csv.DictReader(handle):
-        event_id = (row.get("event_id") or "").strip()
-        latest_json = ""
-        summary = {}
-        if event_id:
-            matches = sorted(glob.glob(str(run_root / event_id / "workflow-*" / "reports" / "workflow-summary.json")))
-            if matches:
-                latest_json = matches[-1]
-                try:
-                    summary = json.loads(Path(latest_json).read_text())
-                except json.JSONDecodeError:
-                    summary = {}
-
-        status = summary.get("status", {})
-        counts = summary.get("counts", {})
-        paths = summary.get("paths", {})
-        quality = summary.get("quality", {}).get("summary", {})
-        rows_out.append({
-            "event_id": event_id,
-            "event_time": (row.get("event_time") or "").strip(),
-            "batch_status": (row.get("status") or "").strip(),
-            "download_status": status.get("download", ""),
-            "obs_validation_status": status.get("obs_validation", ""),
-            "process_status": status.get("process", ""),
-            "plot_status": status.get("plot", ""),
-            "quality_status": status.get("quality", quality.get("status", "")),
-            "quality_ok_stations": quality.get("ok_station_count", ""),
-            "quality_warn_stations": quality.get("warn_station_count", ""),
-            "quality_fail_stations": quality.get("fail_station_count", ""),
-            "cleanup_status": status.get("cleanup", ""),
-            "pride_cleanup_status": status.get("pride_cleanup", ""),
-            "obs_cleanup_status": status.get("obs_cleanup", ""),
-            "requested_stations": counts.get("requested_stations", ""),
-            "obs_files": counts.get("obs_files", ""),
-            "kin_files": counts.get("kin_files", ""),
-            "plot_files": counts.get("plot_files", ""),
-            "duration_seconds": summary.get("duration_seconds", ""),
-            "workflow_dir": paths.get("workflow_dir", ""),
-            "summary_json": latest_json,
-        })
-
-summary_path.parent.mkdir(parents=True, exist_ok=True)
-with summary_path.open("w", newline="") as handle:
-    writer = csv.DictWriter(handle, fieldnames=fields, delimiter="\t", lineterminator="\n")
-    writer.writeheader()
-    writer.writerows(rows_out)
-PY
+  python3 "${PIPELINE_ROOT}/scripts/workflows/build_event_batch_summary.py" \
+    --csv "$CSV_FILE" \
+    --summary "$SUMMARY_FILE" \
+    --run-root "$RUN_ROOT" \
+    --pipeline-root "$PIPELINE_ROOT"
 }
 
 total=0
@@ -535,9 +492,9 @@ while IFS=$'\t' read -r row_index event_id event_time stations; do
   [[ "$ALLOW_PARTIAL" == "1" ]] && cmd+=(--allow-partial)
   [[ "$SKIP_PROCESS" == "1" ]] && cmd+=(--skip-process)
   [[ "$SKIP_PLOT" == "1" ]] && cmd+=(--skip-plot)
-  [[ "$CLEANUP_DOWNLOADS" == "1" ]] && cmd+=(--cleanup-downloads)
-  [[ "$CLEANUP_PRIDE_WORKDIR" == "1" ]] && cmd+=(--cleanup-pride-workdir)
-  [[ "$CLEANUP_OBS" == "1" ]] && cmd+=(--cleanup-obs)
+  [[ "$CLEANUP_DOWNLOADS" == "0" ]] && cmd+=(--no-cleanup-downloads)
+  [[ "$CLEANUP_PRIDE_WORKDIR" == "0" ]] && cmd+=(--no-cleanup-pride-workdir)
+  [[ "$CLEANUP_OBS" == "0" ]] && cmd+=(--no-cleanup-obs)
   [[ "$DRY_RUN" == "1" ]] && cmd+=(--dry-run)
 
   echo

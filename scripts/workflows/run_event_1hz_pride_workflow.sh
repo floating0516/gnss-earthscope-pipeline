@@ -35,6 +35,9 @@ Options:
   --cleanup-downloads       After kin generation, remove compressed/raw downloader intermediates (default: on)
   --cleanup-pride-workdir   After kin generation, remove bulky reproducible PRIDE workdir files (default: on)
   --cleanup-obs             After kin generation, remove data/obs/<event-id> files (default: on)
+  --no-cleanup-downloads    Preserve compressed/raw downloader intermediates
+  --no-cleanup-pride-workdir Preserve bulky reproducible PRIDE workdir files
+  --no-cleanup-obs          Preserve data/obs/<event-id> files
   --dry-run                 Print commands and create no outputs
   -h, --help                Show this help
 
@@ -66,6 +69,65 @@ done
 
 absolute_path() {
   realpath -m -- "$1"
+}
+
+portable_path() {
+  local path="$1"
+  local abs=""
+  if [[ -z "$path" ]]; then
+    printf '\n'
+    return
+  fi
+  abs="$(realpath -m -- "$path")"
+  case "$abs" in
+    "$PIPELINE_ROOT")
+      printf '@ROOT@\n'
+      ;;
+    "$PIPELINE_ROOT"/*)
+      printf '@ROOT@/%s\n' "${abs#"$PIPELINE_ROOT"/}"
+      ;;
+    *)
+      printf '%s\n' "$abs"
+      ;;
+  esac
+}
+
+resolve_path() {
+  local path="$1"
+  if [[ -z "$path" ]]; then
+    printf '\n'
+    return
+  fi
+  case "$path" in
+    @ROOT@)
+      printf '%s\n' "$PIPELINE_ROOT"
+      ;;
+    @ROOT@/*)
+      printf '%s/%s\n' "$PIPELINE_ROOT" "${path#@ROOT@/}"
+      ;;
+    /*)
+      if [[ -e "$path" || -L "$path" ]]; then
+        printf '%s\n' "$path"
+      elif [[ "$path" == *"/gnss-earthscope-pipeline/"* ]]; then
+        printf '%s/%s\n' "$PIPELINE_ROOT" "${path#*/gnss-earthscope-pipeline/}"
+      else
+        printf '%s\n' "$path"
+      fi
+      ;;
+    *)
+      printf '%s/%s\n' "$PIPELINE_ROOT" "$path"
+      ;;
+  esac
+}
+
+portable_manifest() {
+  local in_file="$1"
+  local out_file="$2"
+  : > "$out_file"
+  while IFS= read -r path; do
+    [[ -z "$path" ]] && continue
+    portable_path "$path" >> "$out_file"
+  done < "$in_file"
 }
 
 EVENT_ID=""
@@ -206,12 +268,24 @@ while [[ $# -gt 0 ]]; do
       CLEANUP_DOWNLOADS="1"
       shift
       ;;
+    --no-cleanup-downloads)
+      CLEANUP_DOWNLOADS="0"
+      shift
+      ;;
     --cleanup-pride-workdir)
       CLEANUP_PRIDE_WORKDIR="1"
       shift
       ;;
+    --no-cleanup-pride-workdir)
+      CLEANUP_PRIDE_WORKDIR="0"
+      shift
+      ;;
     --cleanup-obs)
       CLEANUP_OBS="1"
+      shift
+      ;;
+    --no-cleanup-obs)
+      CLEANUP_OBS="0"
       shift
       ;;
     --dry-run)
@@ -397,7 +471,8 @@ obs_validation_status="SKIPPED"
 
 write_obs_inventory() {
   find "$OBS_DIR" -maxdepth 1 -type f \( -name "*.rnx" -o -name "*.[0-9][0-9]o" -o -name "*.obs" \) \
-    | sort > "${MANIFEST_DIR}/obs-files.txt"
+    | sort > "${MANIFEST_DIR}/obs-files.abs.txt"
+  portable_manifest "${MANIFEST_DIR}/obs-files.abs.txt" "${MANIFEST_DIR}/obs-files.txt"
 }
 
 validate_obs_files() {
@@ -433,9 +508,9 @@ validate_obs_files() {
         status="OK"
         reason="ready"
         valid_count=$((valid_count + 1))
-        printf '%s\n' "$match" >> "$valid_obs_file"
+        portable_path "$match" >> "$valid_obs_file"
       fi
-      printf '%s\t%s\t%s\t%s\t%s\n' "$station" "$match" "$size_bytes" "$status" "$reason"
+      printf '%s\t%s\t%s\t%s\t%s\n' "$station" "$(portable_path "$match")" "$size_bytes" "$status" "$reason"
     done
   } > "${MANIFEST_DIR}/obs-validation.tsv"
 
@@ -512,9 +587,12 @@ fi
 if [[ "$SKIP_PROCESS" == "0" ]]; then
   PROCESS_OBS_FILES="${MANIFEST_DIR}/process-obs-files.txt"
   if (( ${#STATIONS[@]} > 0 )) && [[ -s "${MANIFEST_DIR}/valid-requested-obs-files.txt" ]]; then
-    cp -f "${MANIFEST_DIR}/valid-requested-obs-files.txt" "$PROCESS_OBS_FILES"
+    while IFS= read -r obs_file; do
+      [[ -z "$obs_file" ]] && continue
+      resolve_path "$obs_file"
+    done < "${MANIFEST_DIR}/valid-requested-obs-files.txt" > "$PROCESS_OBS_FILES"
   else
-    cp -f "${MANIFEST_DIR}/obs-files.txt" "$PROCESS_OBS_FILES"
+    cp -f "${MANIFEST_DIR}/obs-files.abs.txt" "$PROCESS_OBS_FILES"
   fi
   process_obs_count="$(wc -l < "$PROCESS_OBS_FILES" | tr -d ' ')"
 
@@ -555,12 +633,14 @@ if [[ -n "$latest_pride_summary" && -f "$latest_pride_summary" ]]; then
     seen_header && NF >= 4 && $3 == "OK" { print $4 }
   ' "$latest_pride_summary" \
     | while IFS= read -r station_run_dir; do
-        find "$station_run_dir" -type f -name 'kin_*'
+        resolved_station_run_dir="$(resolve_path "$station_run_dir")"
+        [[ -d "$resolved_station_run_dir" ]] && find "$resolved_station_run_dir" -type f -name 'kin_*'
       done \
-    | sort > "${MANIFEST_DIR}/kin-files.txt"
+    | sort > "${MANIFEST_DIR}/kin-files.abs.txt"
 else
-  find "$PRIDE_RUN_ROOT" -type f -name 'kin_*' | sort > "${MANIFEST_DIR}/kin-files.txt"
+  find "$PRIDE_RUN_ROOT" -type f -name 'kin_*' | sort > "${MANIFEST_DIR}/kin-files.abs.txt"
 fi
+portable_manifest "${MANIFEST_DIR}/kin-files.abs.txt" "${MANIFEST_DIR}/kin-files.txt"
 kin_count="$(wc -l < "${MANIFEST_DIR}/kin-files.txt" | tr -d ' ')"
 plot_count="0"
 
@@ -641,25 +721,36 @@ fi
 
 KIN_QUALITY_TSV="${REPORT_DIR}/kin-quality.tsv"
 KIN_QUALITY_JSON="${REPORT_DIR}/kin-quality.json"
-python3 - "$WORKFLOW_JSON" "$EVENT_ID" "$EVENT_TIME_UTC" "$YEAR" "$DOY" "$WORKFLOW_DIR" "$DOWNLOAD_DIR" "$OBS_DIR" "$PRIDE_RUN_ROOT" "$LOG_DIR" "$MANIFEST_DIR" "$REPORT_DIR" "$latest_pride_summary" "${MANIFEST_DIR}/kin-files.txt" <<'PY'
+python3 - "$WORKFLOW_JSON" "$EVENT_ID" "$EVENT_TIME_UTC" "$YEAR" "$DOY" "$WORKFLOW_DIR" "$DOWNLOAD_DIR" "$OBS_DIR" "$PRIDE_RUN_ROOT" "$LOG_DIR" "$MANIFEST_DIR" "$REPORT_DIR" "$latest_pride_summary" "${MANIFEST_DIR}/kin-files.txt" "$PIPELINE_ROOT" <<'PY'
 import json
 import sys
 from pathlib import Path
 
-out, event_id, event_time, year, doy, workflow_dir, download_dir, obs_dir, pride_run_root, log_dir, manifest_dir, report_dir, pride_summary, kin_files = sys.argv[1:15]
+out, event_id, event_time, year, doy, workflow_dir, download_dir, obs_dir, pride_run_root, log_dir, manifest_dir, report_dir, pride_summary, kin_files, root = sys.argv[1:16]
+
+def portable(path):
+    if not path:
+        return ""
+    try:
+        rel = Path(path).resolve().relative_to(Path(root).resolve())
+    except ValueError:
+        return str(path)
+    return "@ROOT@" if str(rel) == "." else f"@ROOT@/{rel.as_posix()}"
+
 def read_lines(path):
     return [line.strip() for line in Path(path).read_text().splitlines() if line.strip()] if Path(path).exists() else []
 summary = {
     "event": {"id": event_id, "time_utc": event_time, "year": year, "doy": doy},
     "paths": {
-        "workflow_dir": workflow_dir,
-        "download_dir": download_dir,
-        "obs_dir": obs_dir,
-        "pride_run_root": pride_run_root,
-        "logs_dir": log_dir,
-        "manifests_dir": manifest_dir,
-        "reports_dir": report_dir,
-        "pride_summary": pride_summary,
+        "root": "@ROOT@",
+        "workflow_dir": portable(workflow_dir),
+        "download_dir": portable(download_dir),
+        "obs_dir": portable(obs_dir),
+        "pride_run_root": portable(pride_run_root),
+        "logs_dir": portable(log_dir),
+        "manifests_dir": portable(manifest_dir),
+        "reports_dir": portable(report_dir),
+        "pride_summary": portable(pride_summary),
     },
     "files": {"kin": read_lines(kin_files)},
 }
@@ -689,7 +780,7 @@ PY
 else
   echo
   echo "Computing kin quality metrics..."
-  mapfile -t kin_files < "${MANIFEST_DIR}/kin-files.txt"
+  mapfile -t kin_files < "${MANIFEST_DIR}/kin-files.abs.txt"
   if [[ -n "$latest_pride_summary" && -f "$latest_pride_summary" ]]; then
     quality_expected_seconds="$(python3 - "$latest_pride_summary" <<'PY'
 import datetime as dt
@@ -858,24 +949,25 @@ duration_seconds=$((workflow_end_epoch - workflow_start_epoch))
   printf 'kin_file_count\t%s\n' "$kin_count"
   printf 'plot_file_count\t%s\n' "$plot_count"
   printf 'normalized_status\t%s\n' "$normalized_status"
-  printf 'normalized_event_dir\t%s\n' "$normalized_event_dir"
+  printf 'normalized_event_dir\t%s\n' "$(portable_path "$normalized_event_dir")"
   printf 'normalized_station_count\t%s\n' "$normalized_station_count"
   printf 'normalized_waveform_rows\t%s\n' "$normalized_waveform_rows"
   printf 'normalized_event_grade\t%s\n' "$normalized_event_grade"
   printf 'normalized_azimuth_bins_covered\t%s\n' "$normalized_azimuth_bins_covered"
-  printf 'workflow_dir\t%s\n' "$WORKFLOW_DIR"
-  printf 'download_dir\t%s\n' "$DOWNLOAD_DIR"
-  printf 'obs_dir\t%s\n' "$OBS_DIR"
-  printf 'pride_run_root\t%s\n' "$PRIDE_RUN_ROOT"
-  printf 'plots_dir\t%s\n' "$PLOTS_DIR"
-  printf 'kin_quality_tsv\t%s\n' "$KIN_QUALITY_TSV"
-  printf 'kin_quality_json\t%s\n' "$KIN_QUALITY_JSON"
-  printf 'pride_summary\t%s\n' "$latest_pride_summary"
+  printf 'workflow_dir\t%s\n' "$(portable_path "$WORKFLOW_DIR")"
+  printf 'download_dir\t%s\n' "$(portable_path "$DOWNLOAD_DIR")"
+  printf 'obs_dir\t%s\n' "$(portable_path "$OBS_DIR")"
+  printf 'pride_run_root\t%s\n' "$(portable_path "$PRIDE_RUN_ROOT")"
+  printf 'plots_dir\t%s\n' "$(portable_path "$PLOTS_DIR")"
+  printf 'kin_quality_tsv\t%s\n' "$(portable_path "$KIN_QUALITY_TSV")"
+  printf 'kin_quality_json\t%s\n' "$(portable_path "$KIN_QUALITY_JSON")"
+  printf 'pride_summary\t%s\n' "$(portable_path "$latest_pride_summary")"
 } > "${REPORT_DIR}/workflow-summary.tsv"
 
 WORKFLOW_JSON="${REPORT_DIR}/workflow-summary.json"
 export EVENT_ID EVENT_TIME_UTC YEAR DOY HOURS INTERVAL PROCESS_JOBS download_status process_status plot_status quality_status obs_validation_status cleanup_status pride_cleanup_status obs_cleanup_status normalized_status normalized_event_dir normalized_station_count normalized_waveform_rows normalized_event_grade normalized_azimuth_bins_covered duration_seconds
 export WORKFLOW_DIR DOWNLOAD_DIR OBS_DIR PRIDE_RUN_ROOT PLOTS_DIR LOG_DIR MANIFEST_DIR REPORT_DIR latest_pride_summary
+export PIPELINE_ROOT
 export OBS_VALIDATION_FILE="${MANIFEST_DIR}/obs-validation.tsv"
 export OBS_FILES_FILE="${MANIFEST_DIR}/obs-files.txt"
 export KIN_FILES_FILE="${MANIFEST_DIR}/kin-files.txt"
@@ -899,6 +991,19 @@ def read_lines(path):
     if not path or not Path(path).exists():
         return []
     return [line.strip() for line in Path(path).read_text().splitlines() if line.strip()]
+
+
+ROOT = Path(os.environ["PIPELINE_ROOT"]).resolve()
+
+
+def portable(path):
+    if not path:
+        return ""
+    try:
+        rel = Path(path).resolve().relative_to(ROOT)
+    except ValueError:
+        return str(path)
+    return "@ROOT@" if str(rel) == "." else f"@ROOT@/{rel.as_posix()}"
 
 
 def read_tsv_dicts(path):
@@ -943,6 +1048,16 @@ def read_json(path):
         return {}
 
 
+def portable_value(value):
+    if isinstance(value, dict):
+        return {key: portable_value(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [portable_value(item) for item in value]
+    if isinstance(value, str) and value.startswith("/"):
+        return portable(value)
+    return value
+
+
 def as_int(value):
     try:
         return int(value)
@@ -984,23 +1099,24 @@ summary = {
     },
     "duration_seconds": as_int(os.environ["duration_seconds"]),
     "paths": {
-        "workflow_dir": os.environ["WORKFLOW_DIR"],
-        "download_dir": os.environ["DOWNLOAD_DIR"],
-        "obs_dir": os.environ["OBS_DIR"],
-        "pride_run_root": os.environ["PRIDE_RUN_ROOT"],
-        "plots_dir": os.environ["PLOTS_DIR"],
-        "logs_dir": os.environ["LOG_DIR"],
-        "manifests_dir": os.environ["MANIFEST_DIR"],
-        "reports_dir": os.environ["REPORT_DIR"],
-        "kin_quality_tsv": os.environ["KIN_QUALITY_TSV"],
-        "kin_quality_json": os.environ["KIN_QUALITY_JSON"],
-        "pride_summary": os.environ.get("latest_pride_summary", ""),
-        "normalized_event_dir": os.environ["normalized_event_dir"],
+        "root": "@ROOT@",
+        "workflow_dir": portable(os.environ["WORKFLOW_DIR"]),
+        "download_dir": portable(os.environ["DOWNLOAD_DIR"]),
+        "obs_dir": portable(os.environ["OBS_DIR"]),
+        "pride_run_root": portable(os.environ["PRIDE_RUN_ROOT"]),
+        "plots_dir": portable(os.environ["PLOTS_DIR"]),
+        "logs_dir": portable(os.environ["LOG_DIR"]),
+        "manifests_dir": portable(os.environ["MANIFEST_DIR"]),
+        "reports_dir": portable(os.environ["REPORT_DIR"]),
+        "kin_quality_tsv": portable(os.environ["KIN_QUALITY_TSV"]),
+        "kin_quality_json": portable(os.environ["KIN_QUALITY_JSON"]),
+        "pride_summary": portable(os.environ.get("latest_pride_summary", "")),
+        "normalized_event_dir": portable(os.environ["normalized_event_dir"]),
         "normalized_event_grade": os.environ["normalized_event_grade"],
     },
     "obs_validation": read_tsv_dicts(os.environ.get("OBS_VALIDATION_FILE")),
     "pride_stations": read_pride_summary(os.environ.get("PRIDE_SUMMARY_FILE")),
-    "quality": read_json(os.environ.get("KIN_QUALITY_JSON")),
+    "quality": portable_value(read_json(os.environ.get("KIN_QUALITY_JSON"))),
     "files": {
         "obs": read_lines(os.environ.get("OBS_FILES_FILE")),
         "kin": read_lines(os.environ.get("KIN_FILES_FILE")),
@@ -1035,19 +1151,19 @@ PY
   printf '%s\n\n' "- Kinematic files: \`${kin_count}\`"
   printf '%s\n\n' "- Plot files: \`${plot_count}\`"
   printf '## Paths\n\n'
-  printf '%s\n' "- Workflow directory: \`${WORKFLOW_DIR}\`"
-  printf '%s\n' "- Download products: \`${DOWNLOAD_DIR}\`"
-  printf '%s\n' "- Canonical obs files: \`${OBS_DIR}\`"
-  printf '%s\n' "- PRIDE runs: \`${PRIDE_RUN_ROOT}\`"
-  printf '%s\n' "- Logs: \`${LOG_DIR}\`"
-  printf '%s\n' "- Manifests: \`${MANIFEST_DIR}\`"
-  printf '%s\n' "- Normalized event: \`${normalized_event_dir}\`"
-  printf '%s\n' "- Kin quality TSV: \`${KIN_QUALITY_TSV}\`"
-  printf '%s\n' "- Kin quality JSON: \`${KIN_QUALITY_JSON}\`"
-  printf '%s\n' "- Reports: \`${REPORT_DIR}\`"
-  printf '%s\n' "- JSON summary: \`${WORKFLOW_JSON}\`"
+  printf '%s\n' "- Workflow directory: \`$(portable_path "$WORKFLOW_DIR")\`"
+  printf '%s\n' "- Download products: \`$(portable_path "$DOWNLOAD_DIR")\`"
+  printf '%s\n' "- Canonical obs files: \`$(portable_path "$OBS_DIR")\`"
+  printf '%s\n' "- PRIDE runs: \`$(portable_path "$PRIDE_RUN_ROOT")\`"
+  printf '%s\n' "- Logs: \`$(portable_path "$LOG_DIR")\`"
+  printf '%s\n' "- Manifests: \`$(portable_path "$MANIFEST_DIR")\`"
+  printf '%s\n' "- Normalized event: \`$(portable_path "$normalized_event_dir")\`"
+  printf '%s\n' "- Kin quality TSV: \`$(portable_path "$KIN_QUALITY_TSV")\`"
+  printf '%s\n' "- Kin quality JSON: \`$(portable_path "$KIN_QUALITY_JSON")\`"
+  printf '%s\n' "- Reports: \`$(portable_path "$REPORT_DIR")\`"
+  printf '%s\n' "- JSON summary: \`$(portable_path "$WORKFLOW_JSON")\`"
   if [[ -n "$latest_pride_summary" ]]; then
-    printf '%s\n' "- PRIDE event summary: \`${latest_pride_summary}\`"
+    printf '%s\n' "- PRIDE event summary: \`$(portable_path "$latest_pride_summary")\`"
   fi
 } > "${REPORT_DIR}/workflow-summary.md"
 
@@ -1072,6 +1188,15 @@ if [[ "$SKIP_PLOT" == "0" && "$usable_kin" == "1" && "$normalized_status" == "OK
     final_plot_status="FAIL"
     echo "Final normalized plotting failed. See ${LOG_DIR}/plot-final-normalized.log" >&2
   fi
+  python3 "${PIPELINE_ROOT}/scripts/workflows/update_workflow_summary_status.py" \
+    --extract-plot-files-from-log "${LOG_DIR}/plot-final-normalized.log" \
+    --write-plot-files "${MANIFEST_DIR}/plot-files.txt"
+  python3 "${PIPELINE_ROOT}/scripts/workflows/update_workflow_summary_status.py" \
+    --summary-json "$WORKFLOW_JSON" \
+    --summary-tsv "${REPORT_DIR}/workflow-summary.tsv" \
+    --summary-md "${REPORT_DIR}/workflow-summary.md" \
+    --plot-status "$final_plot_status" \
+    --plot-files "${MANIFEST_DIR}/plot-files.txt"
 fi
 
 if [[ "$usable_kin" != "1" || "$pride_cleanup_status" == "FAIL" || "$obs_cleanup_status" == "FAIL" || "$normalized_status" == "FAIL" || "$final_plot_status" == "FAIL" ]]; then

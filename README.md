@@ -99,6 +99,8 @@ scripts/workflows/run_event_batch_workflow.sh --help
 scripts/workflows/run_event_1hz_pride_workflow.sh --help
 ```
 
+Cleanup remains enabled by default. Use `--no-cleanup-obs`, `--no-cleanup-pride-workdir`, or `--no-cleanup-downloads` when preserving intermediates for debugging.
+
 Primary GeoNet workflow:
 
 ```bash
@@ -232,6 +234,8 @@ scripts/workflows/current_pipeline.sh paths
 scripts/workflows/run_event_batch_workflow.sh --help
 scripts/workflows/run_event_1hz_pride_workflow.sh --help
 ```
+
+默认仍会执行清理。调试时如需保留中间产物，可使用 `--no-cleanup-obs`、`--no-cleanup-pride-workdir` 或 `--no-cleanup-downloads`。
 
 主力 GeoNet workflow：
 

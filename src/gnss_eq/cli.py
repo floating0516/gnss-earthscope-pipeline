@@ -75,9 +75,9 @@ def add_common_workflow_flags(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--skip-process", action="store_true")
     parser.add_argument("--skip-plot", action="store_true")
     parser.add_argument("--post-seconds", default="200")
-    parser.add_argument("--cleanup-downloads", action="store_true", default=True)
-    parser.add_argument("--cleanup-pride-workdir", action="store_true", default=True)
-    parser.add_argument("--cleanup-obs", action="store_true", default=True)
+    parser.add_argument("--cleanup-downloads", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--cleanup-pride-workdir", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--cleanup-obs", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--dry-run", action="store_true")
 
 
@@ -120,13 +120,16 @@ def cmd_run_event(args: argparse.Namespace) -> int:
         ("--allow-partial", args.allow_partial),
         ("--skip-process", args.skip_process),
         ("--skip-plot", args.skip_plot),
-        ("--cleanup-downloads", args.cleanup_downloads),
-        ("--cleanup-pride-workdir", args.cleanup_pride_workdir),
-        ("--cleanup-obs", args.cleanup_obs),
         ("--dry-run", args.dry_run),
     ]:
         if enabled:
             cmd.append(flag)
+    if not args.cleanup_downloads:
+        cmd.append("--no-cleanup-downloads")
+    if not args.cleanup_pride_workdir:
+        cmd.append("--no-cleanup-pride-workdir")
+    if not args.cleanup_obs:
+        cmd.append("--no-cleanup-obs")
     return run_command(cmd)
 
 
@@ -175,14 +178,17 @@ def cmd_run_batch(args: argparse.Namespace) -> int:
         ("--no-allow-partial", args.no_allow_partial),
         ("--skip-process", args.skip_process),
         ("--skip-plot", args.skip_plot),
-        ("--cleanup-downloads", args.cleanup_downloads),
-        ("--cleanup-pride-workdir", args.cleanup_pride_workdir),
-        ("--cleanup-obs", args.cleanup_obs),
         ("--rerun-ok", args.rerun_ok),
         ("--dry-run", args.dry_run),
     ]:
         if enabled:
             cmd.append(flag)
+    if not args.cleanup_downloads:
+        cmd.append("--no-cleanup-downloads")
+    if not args.cleanup_pride_workdir:
+        cmd.append("--no-cleanup-pride-workdir")
+    if not args.cleanup_obs:
+        cmd.append("--no-cleanup-obs")
     return run_command(cmd)
 
 

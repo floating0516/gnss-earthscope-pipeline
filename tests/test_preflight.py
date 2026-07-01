@@ -26,6 +26,16 @@ class CompletedCurl:
 
 
 class PreflightTest(unittest.TestCase):
+    def test_script_checks_cover_full_earthscope_workflow(self):
+        names = {result.name for result in preflight.script_checks()}
+
+        self.assertIn("quality script", names)
+        self.assertIn("normalizer script", names)
+        self.assertIn("summary updater script", names)
+        self.assertIn("batch summary builder script", names)
+        self.assertIn("final plotter script", names)
+        self.assertIn("PRIDE cleaner script", names)
+
     def test_missing_pdp3_is_fatal(self):
         def which(command, path=None):
             return None if command == "pdp3" else f"/usr/bin/{command}"

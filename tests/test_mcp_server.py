@@ -333,6 +333,13 @@ class McpServerTest(unittest.TestCase):
         self.assertEqual(result["suggested_action"], "inspect_preflight_report")
         self.assertIn("PREFLIGHT_FAILED", result["stdout"])
 
+    def test_run_batch_nonconus_subset_label_is_stable_without_csv_inspection(self):
+        csv_path = Path("data/batches/example.csv")
+        with patch.object(mcp_server.subprocess, "run", return_value=Completed):
+            result = mcp_server.run_batch(str(csv_path), source="earthscope_nonconus")
+
+        self.assertEqual(result["earthscope_subset"], "nonconus")
+
     def test_run_batch_builds_flags(self):
         csv_path = Path("data/batches/example.csv")
         with patch.object(mcp_server.subprocess, "run", return_value=Completed) as run:
@@ -340,8 +347,9 @@ class McpServerTest(unittest.TestCase):
                 str(csv_path),
                 timeout=120,
                 process_jobs=5,
-                cleanup_pride_workdir=True,
-                cleanup_obs=True,
+                cleanup_downloads=False,
+                cleanup_pride_workdir=False,
+                cleanup_obs=False,
                 rerun_ok=True,
                 source="earthscope_nonconus",
                 use_verified_files=True,
@@ -357,8 +365,9 @@ class McpServerTest(unittest.TestCase):
                 "120",
                 "--process-jobs",
                 "5",
-                "--cleanup-pride-workdir",
-                "--cleanup-obs",
+                "--no-cleanup-downloads",
+                "--no-cleanup-pride-workdir",
+                "--no-cleanup-obs",
                 "--rerun-ok",
             ],
         )
@@ -369,9 +378,12 @@ class McpServerTest(unittest.TestCase):
         self.assertEqual(result["process_jobs"], 5)
         self.assertEqual(result["source"], "earthscope")
         self.assertEqual(result["requested_source"], "earthscope_nonconus")
-        self.assertEqual(result["earthscope_subset"], "earthscope_nonconus")
+        self.assertEqual(result["earthscope_subset"], "nonconus")
         self.assertEqual(result["db"], "data/earthscope_availability/earthscope_nonconus_1hz.sqlite")
         self.assertTrue(result["use_verified_files"])
+        self.assertFalse(result["cleanup_downloads"])
+        self.assertFalse(result["cleanup_pride_workdir"])
+        self.assertFalse(result["cleanup_obs"])
 
     def test_get_batch_summary_reads_and_filters_rows(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -480,8 +492,12 @@ class McpServerTest(unittest.TestCase):
             conn.execute("UPDATE usgs_m6plus_events_usa SET existing_data_status = ?, existing_station_count = ?", ("HAS_NORMALIZED", 3))
             conn.commit()
             conn.close()
-            workflow_dir = Path(tmp) / "event-a" / "workflow-20260101"
-            workflow_dir.mkdir(parents=True)
+            report_dir = Path(tmp) / "event-a" / "workflow-20260101" / "reports"
+            report_dir.mkdir(parents=True)
+            (report_dir / "workflow-summary.json").write_text(
+                json.dumps({"status": {"normalized": "OK"}}),
+                encoding="utf-8",
+            )
             with patch.object(mcp_server, "DEFAULT_DB", db):
                 with patch.object(mcp_server, "NONCONUS_DB", Path(tmp) / "missing-nonconus.sqlite"):
                     with patch.object(mcp_server, "RUNS_ROOT", Path(tmp)):
@@ -490,6 +506,33 @@ class McpServerTest(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(result["events"][0]["coverage_status"], "BOTH")
         self.assertEqual(result["events"][0]["priority"], "SKIP")
+
+    def test_overview_coverage_marks_failed_workflow_retryable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Path(tmp) / "earthscope.sqlite"
+            create_earthscope_db(db)
+            conn = sqlite3.connect(db)
+            for index in range(3, 8):
+                conn.execute(
+                    "INSERT INTO event_earthscope_station_candidates VALUES (?, ?, ?, ?, ?, ?)",
+                    ("event-a", f"S{index:03d}", 1.0, 2.0, 3.0, 200.0),
+                )
+            conn.commit()
+            conn.close()
+            report_dir = Path(tmp) / "event-a" / "workflow-20260101" / "reports"
+            report_dir.mkdir(parents=True)
+            (report_dir / "workflow-summary.json").write_text(
+                json.dumps({"status": {"download": "FAIL", "process": "SKIPPED", "normalized": "SKIPPED_WORKFLOW_FAILED"}}),
+                encoding="utf-8",
+            )
+            with patch.object(mcp_server, "DEFAULT_DB", db):
+                with patch.object(mcp_server, "NONCONUS_DB", Path(tmp) / "missing-nonconus.sqlite"):
+                    with patch.object(mcp_server, "RUNS_ROOT", Path(tmp)):
+                        result = mcp_server.overview(view="coverage")
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["events"][0]["coverage_status"], "FAILED_RETRYABLE")
+        self.assertEqual(result["events"][0]["priority"], "MEDIUM")
 
     def test_overview_nonconus_events_and_stations(self):
         with tempfile.TemporaryDirectory() as tmp:

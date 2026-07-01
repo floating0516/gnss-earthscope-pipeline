@@ -14,6 +14,8 @@ try:
 except ImportError as exc:  # pragma: no cover
     raise SystemExit("Install MCP support with: pip install -e .[mcp]") from exc
 
+from gnss_eq import monitor
+
 ROOT = Path(__file__).resolve().parents[2]
 CURRENT_PIPELINE = ROOT / "scripts" / "workflows" / "current_pipeline.sh"
 BATCH_ROOT = ROOT / "data" / "batches"
@@ -144,6 +146,13 @@ def _is_earthscope_source(source: str) -> bool:
     return _validate_source(source) in {"earthscope", "earthscope_nonconus"}
 
 
+def _earthscope_default_subset(source: str) -> str:
+    configs = _earthscope_source_configs(source)
+    if len(configs) == 1:
+        return str(configs[0]["subset"])
+    return "earthscope"
+
+
 def _earthscope_source_configs(source: str) -> list[dict[str, Any]]:
     source = _validate_source(source)
     if source == "earthscope":
@@ -197,39 +206,6 @@ def _display_path(path: Path) -> str:
         return str(path.relative_to(ROOT))
     except ValueError:
         return str(path)
-
-
-def _workflow_event_ids() -> set[str]:
-    if not RUNS_ROOT.exists():
-        return set()
-    return {
-        path.name
-        for path in RUNS_ROOT.iterdir()
-        if path.is_dir() and any(child.is_dir() and child.name.startswith("workflow-") for child in path.iterdir())
-    }
-
-
-def _coverage_status(event: dict[str, Any], workflow_event_ids: set[str]) -> str:
-    has_workflow = str(event.get("event_id", "")) in workflow_event_ids
-    has_collected = event.get("existing_data_status") == "HAS_NORMALIZED"
-    if has_workflow and has_collected:
-        return "BOTH"
-    if has_workflow:
-        return "WORKFLOW_DONE"
-    if has_collected:
-        return "COLLECTED_NORMALIZED"
-    return "MISSING"
-
-
-def _event_priority(event: dict[str, Any], coverage_status: str) -> str:
-    if coverage_status != "MISSING":
-        return "SKIP"
-    stations_200km = int(event.get("stations_200km", 0) or 0)
-    if stations_200km >= 20:
-        return "HIGH"
-    if stations_200km >= 5:
-        return "MEDIUM"
-    return "LOW"
 
 
 def _check_env() -> dict[str, Any]:
@@ -728,12 +704,12 @@ def overview(
         events = [event for event in events if str(event.get("event_id", "")) == event_id]
 
     if view == "coverage":
-        workflow_event_ids = _workflow_event_ids()
+        workflow_statuses = monitor.workflow_status_by_event(RUNS_ROOT)
         events = [
             {
                 **event,
-                "coverage_status": (status := _coverage_status(event, workflow_event_ids)),
-                "priority": _event_priority(event, status),
+                "coverage_status": (status := monitor.coverage_status(event, workflow_statuses)),
+                "priority": monitor.event_priority(event, status),
             }
             for event in events
         ]
@@ -766,8 +742,9 @@ def run_batch(
     csv: str,
     timeout: int = 3600,
     process_jobs: int = 1,
-    cleanup_pride_workdir: bool = False,
-    cleanup_obs: bool = False,
+    cleanup_downloads: bool = True,
+    cleanup_pride_workdir: bool = True,
+    cleanup_obs: bool = True,
     rerun_ok: bool = False,
     source: str = "earthscope",
     use_verified_files: bool = False,
@@ -780,7 +757,7 @@ def run_batch(
     if _is_earthscope_source(source) and csv_path.exists():
         db_path, earthscope_subset = _resolve_earthscope_batch_db(csv_path, source)
     else:
-        db_path, earthscope_subset = _source_db(source), source
+        db_path, earthscope_subset = _source_db(source), _earthscope_default_subset(source)
     args = [
         "run-batch",
         "--csv",
@@ -790,10 +767,12 @@ def run_batch(
         "--process-jobs",
         str(process_jobs),
     ]
-    if cleanup_pride_workdir:
-        args.append("--cleanup-pride-workdir")
-    if cleanup_obs:
-        args.append("--cleanup-obs")
+    if not cleanup_downloads:
+        args.append("--no-cleanup-downloads")
+    if not cleanup_pride_workdir:
+        args.append("--no-cleanup-pride-workdir")
+    if not cleanup_obs:
+        args.append("--no-cleanup-obs")
     if rerun_ok:
         args.append("--rerun-ok")
 
@@ -811,6 +790,9 @@ def run_batch(
     result["earthscope_subset"] = earthscope_subset if _is_earthscope_source(source) else None
     result["db"] = _display_path(db_path)
     result["use_verified_files"] = use_verified_files
+    result["cleanup_downloads"] = cleanup_downloads
+    result["cleanup_pride_workdir"] = cleanup_pride_workdir
+    result["cleanup_obs"] = cleanup_obs
     return result
 
 
