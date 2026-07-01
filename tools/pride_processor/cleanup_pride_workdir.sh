@@ -20,6 +20,9 @@ EOF
 PRIDE_SUMMARY=""
 DRY_RUN="0"
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PIPELINE_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --pride-summary)
@@ -62,6 +65,34 @@ delete_path() {
     printf 'DELETE\t%s\n' "$path"
     rm -rf -- "$path"
   fi
+}
+
+resolve_path() {
+  local path="$1"
+  if [[ -z "$path" ]]; then
+    printf '\n'
+    return
+  fi
+  case "$path" in
+    @ROOT@)
+      printf '%s\n' "$PIPELINE_ROOT"
+      ;;
+    @ROOT@/*)
+      printf '%s/%s\n' "$PIPELINE_ROOT" "${path#@ROOT@/}"
+      ;;
+    /*)
+      if [[ -e "$path" || -L "$path" ]]; then
+        printf '%s\n' "$path"
+      elif [[ "$path" == *"/gnss-earthscope-pipeline/"* ]]; then
+        printf '%s/%s\n' "$PIPELINE_ROOT" "${path#*/gnss-earthscope-pipeline/}"
+      else
+        printf '%s\n' "$path"
+      fi
+      ;;
+    *)
+      printf '%s/%s\n' "$PIPELINE_ROOT" "$path"
+      ;;
+  esac
 }
 
 cleanup_station_dir() {
@@ -116,5 +147,5 @@ awk -F '\t' '
   seen_header && NF >= 4 && $3 == "OK" { print $2 "\t" $4 }
 ' "$PRIDE_SUMMARY" \
   | while IFS=$'\t' read -r obs_file station_run_dir; do
-      cleanup_station_dir "$station_run_dir" "$obs_file"
+      cleanup_station_dir "$(resolve_path "$station_run_dir")" "$(resolve_path "$obs_file")"
     done

@@ -37,6 +37,58 @@ PROCESS_JOBS="1"
 DRY_RUN="0"
 declare -a OBS_FILES=()
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PIPELINE_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+
+portable_path() {
+  local path="$1"
+  local abs=""
+  if [[ -z "$path" ]]; then
+    printf '\n'
+    return
+  fi
+  abs="$(realpath -m -- "$path")"
+  case "$abs" in
+    "$PIPELINE_ROOT")
+      printf '@ROOT@\n'
+      ;;
+    "$PIPELINE_ROOT"/*)
+      printf '@ROOT@/%s\n' "${abs#"$PIPELINE_ROOT"/}"
+      ;;
+    *)
+      printf '%s\n' "$abs"
+      ;;
+  esac
+}
+
+resolve_path() {
+  local path="$1"
+  if [[ -z "$path" ]]; then
+    printf '\n'
+    return
+  fi
+  case "$path" in
+    @ROOT@)
+      printf '%s\n' "$PIPELINE_ROOT"
+      ;;
+    @ROOT@/*)
+      printf '%s/%s\n' "$PIPELINE_ROOT" "${path#@ROOT@/}"
+      ;;
+    /*)
+      if [[ -e "$path" || -L "$path" ]]; then
+        printf '%s\n' "$path"
+      elif [[ "$path" == *"/gnss-earthscope-pipeline/"* ]]; then
+        printf '%s/%s\n' "$PIPELINE_ROOT" "${path#*/gnss-earthscope-pipeline/}"
+      else
+        printf '%s\n' "$path"
+      fi
+      ;;
+    *)
+      printf '%s/%s\n' "$PIPELINE_ROOT" "$path"
+      ;;
+  esac
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --event-id)
@@ -105,8 +157,7 @@ if [[ -z "$EVENT_ID" || -z "$EVENT_TIME" ]]; then
 fi
 
 if [[ -z "$OBS_DIR" ]]; then
-  PIPELINE_ROOT_DEFAULT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-  OBS_DIR="${GNSS_EQ_OBS_ROOT:-${PIPELINE_ROOT_DEFAULT}/data/obs}/${EVENT_ID}"
+  OBS_DIR="${GNSS_EQ_OBS_ROOT:-${PIPELINE_ROOT}/data/obs}/${EVENT_ID}"
 fi
 
 if [[ -z "$RUN_ROOT" ]]; then
@@ -193,7 +244,7 @@ if [[ "$DRY_RUN" == "0" ]]; then
     printf 'window_end_utc\t%s\n' "$(date -u -d "@${end_epoch}" +%Y-%m-%dT%H:%M:%SZ)"
     printf 'hours_each_side\t%s\n' "$HOURS"
     printf 'interval_seconds\t%s\n' "$INTERVAL"
-    printf 'run_dir\t%s\n' "$run_dir"
+    printf 'run_dir\t%s\n' "$(portable_path "$run_dir")"
     printf 'station\tobs_file\tstatus\tstation_run_dir\n'
   } > "$summary_file"
 fi
@@ -211,13 +262,18 @@ process_one_obs() {
   local station=""
   local station_dir=""
   local status_file=""
+  local obs_portable=""
+  local station_dir_portable=""
 
-  obs_path="$(readlink -f "$obs")"
+  obs_path="$(resolve_path "$obs")"
+  obs_path="$(readlink -f "$obs_path")"
   obs_name="$(basename "$obs_path")"
   station="${obs_name:0:4}"
   station="${station,,}"
   station_dir="${run_dir}/${station}"
   status_file="${status_dir}/${station}.tsv"
+  obs_portable="$(portable_path "$obs_path")"
+  station_dir_portable="$(portable_path "$station_dir")"
 
   echo "== ${station} =="
   echo "pdp3 -s ${start_date} ${start_time} -e ${end_date} ${end_time} -i ${INTERVAL} ${obs_name}"
@@ -231,6 +287,7 @@ process_one_obs() {
   if [[ -f "$status_file" ]] && awk -F '\t' 'NF >= 3 && $3 == "OK" { found = 1 } END { exit found ? 0 : 1 }' "$status_file" \
       && find "$station_dir" -type f -name 'kin_*' -print -quit | grep -q .; then
     echo "Existing OK kin found for ${station}; skipping pdp3."
+    printf '%s\t%s\t%s\t%s\n' "$station" "$obs_portable" "OK" "$station_dir_portable" > "$status_file"
     return 0
   fi
 
@@ -240,9 +297,9 @@ process_one_obs() {
     cd "$station_dir"
     pdp3 -s "$start_date" "$start_time" -e "$end_date" "$end_time" -i "$INTERVAL" "$obs_name"
   ) >"${station_dir}/pdp3.log" 2>&1 && find "$station_dir" -type f -name 'kin_*' -print -quit | grep -q .; then
-    printf '%s\t%s\t%s\t%s\n' "$station" "$obs_path" "OK" "$station_dir" > "$status_file"
+    printf '%s\t%s\t%s\t%s\n' "$station" "$obs_portable" "OK" "$station_dir_portable" > "$status_file"
   else
-    printf '%s\t%s\t%s\t%s\n' "$station" "$obs_path" "FAIL" "$station_dir" > "$status_file"
+    printf '%s\t%s\t%s\t%s\n' "$station" "$obs_portable" "FAIL" "$station_dir_portable" > "$status_file"
   fi
 }
 

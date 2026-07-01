@@ -182,7 +182,7 @@ def event_grade(station_rows: list[dict], azimuth_bin_count: int = 8) -> dict[st
 def normalization_metadata(include_warn: bool) -> dict[str, object]:
     return {
         "coordinate_transform": "ECEF XYZ minus reference position, then rotated to local ENU",
-        "coordinate_frame": "PRIDE kin_* input frame inherited from processing products; output components are local ENU",
+        "coordinate_frame": "PRIDE kin_* input frame inherited from processing products; kin epochs are interpreted as GPST and exported as UTC; output components are local ENU",
         "reference_position": "median ECEF position over all pre-event epochs; fallback to first 300 epochs when no pre-event data exists",
         "reference_epoch": "event-relative pre-event window, not a single epoch",
         "input_units": "PRIDE kin_* coordinates in meters; intermediate ENU displacement in centimeters",

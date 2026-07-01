@@ -15,6 +15,26 @@ from pathlib import Path
 
 MJD_UNIX_EPOCH = 40587
 SECONDS_PER_DAY = 86400
+GPS_UTC_OFFSETS = (
+    (dt.datetime(1981, 7, 1, tzinfo=dt.timezone.utc), 1),
+    (dt.datetime(1982, 7, 1, tzinfo=dt.timezone.utc), 2),
+    (dt.datetime(1983, 7, 1, tzinfo=dt.timezone.utc), 3),
+    (dt.datetime(1985, 7, 1, tzinfo=dt.timezone.utc), 4),
+    (dt.datetime(1988, 1, 1, tzinfo=dt.timezone.utc), 5),
+    (dt.datetime(1990, 1, 1, tzinfo=dt.timezone.utc), 6),
+    (dt.datetime(1991, 1, 1, tzinfo=dt.timezone.utc), 7),
+    (dt.datetime(1992, 7, 1, tzinfo=dt.timezone.utc), 8),
+    (dt.datetime(1993, 7, 1, tzinfo=dt.timezone.utc), 9),
+    (dt.datetime(1994, 7, 1, tzinfo=dt.timezone.utc), 10),
+    (dt.datetime(1996, 1, 1, tzinfo=dt.timezone.utc), 11),
+    (dt.datetime(1997, 7, 1, tzinfo=dt.timezone.utc), 12),
+    (dt.datetime(1999, 1, 1, tzinfo=dt.timezone.utc), 13),
+    (dt.datetime(2006, 1, 1, tzinfo=dt.timezone.utc), 14),
+    (dt.datetime(2009, 1, 1, tzinfo=dt.timezone.utc), 15),
+    (dt.datetime(2012, 7, 1, tzinfo=dt.timezone.utc), 16),
+    (dt.datetime(2015, 7, 1, tzinfo=dt.timezone.utc), 17),
+    (dt.datetime(2017, 1, 1, tzinfo=dt.timezone.utc), 18),
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -59,9 +79,26 @@ def parse_utc(value: str) -> dt.datetime:
     return parsed.astimezone(dt.timezone.utc)
 
 
-def mjd_sod_to_utc(mjd: int, sod: float) -> dt.datetime:
+def mjd_sod_to_gpst(mjd: int, sod: float) -> dt.datetime:
     seconds = (mjd - MJD_UNIX_EPOCH) * SECONDS_PER_DAY + sod
     return dt.datetime.fromtimestamp(seconds, tz=dt.timezone.utc)
+
+
+def gps_utc_offset_seconds(gpst: dt.datetime) -> int:
+    gpst = gpst.astimezone(dt.timezone.utc)
+    offset = 0
+    for effective_utc, value in GPS_UTC_OFFSETS:
+        if gpst >= effective_utc + dt.timedelta(seconds=value):
+            offset = value
+        else:
+            break
+    return offset
+
+
+def mjd_sod_to_utc(mjd: int, sod: float) -> dt.datetime:
+    gpst = mjd_sod_to_gpst(mjd, sod)
+    offset = gps_utc_offset_seconds(gpst)
+    return gpst - dt.timedelta(seconds=offset)
 
 
 def station_from_path(path: Path) -> str:

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import csv
+import gzip
 import json
 import sqlite3
 import sys
@@ -16,6 +18,36 @@ import normalize_pride_kin_event as normalize
 
 
 class NormalizePrideKinEventTest(unittest.TestCase):
+    def test_workflow_kin_files_resolves_relative_root_token_and_legacy_absolute_paths(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            workflow_root = tmp_path / "runs" / "event-a" / "workflow-20200101T000000Z"
+            reports_dir = workflow_root / "reports"
+            manifests_dir = workflow_root / "manifests"
+            kin_dir = workflow_root / "pride" / "event-a-pdp3-1h" / "abcd" / "2020" / "001"
+            workflow_summary = reports_dir / "workflow-summary.json"
+            kin_file = kin_dir / "kin_2020001_abcd"
+            reports_dir.mkdir(parents=True)
+            manifests_dir.mkdir(parents=True)
+            kin_dir.mkdir(parents=True)
+            kin_file.write_text("END OF HEADER\n", encoding="utf-8")
+
+            summary = {
+                "paths": {"root": str(tmp_path)},
+                "files": {
+                    "kin": [
+                        "@ROOT@/runs/event-a/workflow-20200101T000000Z/pride/event-a-pdp3-1h/abcd/2020/001/kin_2020001_abcd",
+                        "runs/event-a/workflow-20200101T000000Z/pride/event-a-pdp3-1h/abcd/2020/001/kin_2020001_abcd",
+                        "/old/machine/gnss-earthscope-pipeline/runs/event-a/workflow-20200101T000000Z/pride/event-a-pdp3-1h/abcd/2020/001/kin_2020001_abcd",
+                    ]
+                },
+            }
+            workflow_summary.write_text(json.dumps(summary), encoding="utf-8")
+
+            resolved = normalize.workflow_kin_files(summary, workflow_summary)
+
+            self.assertEqual(resolved, [kin_file])
+
     def test_read_event_supports_nonconus_event_table(self):
         conn = sqlite3.connect(":memory:")
         conn.row_factory = sqlite3.Row
@@ -116,8 +148,11 @@ class NormalizePrideKinEventTest(unittest.TestCase):
             tmp_path = Path(tmp)
             db_path = tmp_path / "events.sqlite"
             normalized_root = tmp_path / "normalized"
-            workflow_summary = tmp_path / "workflow-summary.json"
-            quality_json = tmp_path / "kin-quality.json"
+            workflow_root = tmp_path / "workflow"
+            reports_dir = workflow_root / "reports"
+            manifests_dir = workflow_root / "manifests"
+            workflow_summary = reports_dir / "workflow-summary.json"
+            quality_json = reports_dir / "kin-quality.json"
             good_kin = tmp_path / "kin_2020001_good"
             missing_kin = tmp_path / "kin_2020001_miss"
 
@@ -178,13 +213,11 @@ class NormalizePrideKinEventTest(unittest.TestCase):
             kin_body = "END OF HEADER\n58849 86390 1000 2000 3000\n58850 10 1001 2001 3001\n"
             good_kin.write_text(kin_body, encoding="utf-8")
             missing_kin.write_text(kin_body, encoding="utf-8")
+            manifests_dir.mkdir(parents=True)
+            reports_dir.mkdir(parents=True)
+            (manifests_dir / "kin-files.txt").write_text(f"{good_kin}\n{missing_kin}\n", encoding="utf-8")
             workflow_summary.write_text(
-                json.dumps(
-                    {
-                        "event": {"id": "test-event", "time_utc": "2020-01-01T00:00:00Z"},
-                        "files": {"kin": [str(good_kin), str(missing_kin)]},
-                    }
-                ),
+                json.dumps({"event": {"id": "test-event", "time_utc": "2020-01-01T00:00:00Z"}}),
                 encoding="utf-8",
             )
             quality_json.write_text(
@@ -221,10 +254,119 @@ class NormalizePrideKinEventTest(unittest.TestCase):
             self.assertEqual(result["normalized_status"], "OK")
             self.assertEqual(result["normalized_station_count"], 1)
             self.assertEqual(result["skipped_stations"], [{"station": "MISS", "reason": "missing_coordinates"}])
-            stations_csv = Path(result["normalized_event_dir"]) / "stations.csv"
+            event_dir = Path(result["normalized_event_dir"])
+            stations_csv = event_dir / "stations.csv"
             self.assertIn("GOOD", stations_csv.read_text(encoding="utf-8"))
-            event_json = json.loads((Path(result["normalized_event_dir"]) / "event.json").read_text(encoding="utf-8"))
+            event_json = json.loads((event_dir / "event.json").read_text(encoding="utf-8"))
             self.assertEqual(event_json["skipped_stations"], result["skipped_stations"])
+            self.assertIn("kin epochs are interpreted as GPST", event_json["normalization"]["coordinate_frame"])
+            with gzip.open(event_dir / "waveforms.csv.gz", "rt", encoding="utf-8", newline="") as handle:
+                waveform_rows = list(csv.DictReader(handle))
+            self.assertEqual(waveform_rows[0]["Time_UTC"], "2020-01-01T23:59:32Z")
+            self.assertEqual(waveform_rows[0]["Time_Offset_s"], "86372.000000")
+            self.assertEqual(waveform_rows[3]["Time_UTC"], "2020-01-01T23:59:52Z")
+            self.assertEqual(waveform_rows[3]["Time_Offset_s"], "86392.000000")
+
+    def test_write_outputs_uses_catalog_fractional_event_time_for_offsets(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            db_path = tmp_path / "events.sqlite"
+            normalized_root = tmp_path / "normalized"
+            workflow_root = tmp_path / "workflow"
+            reports_dir = workflow_root / "reports"
+            manifests_dir = workflow_root / "manifests"
+            workflow_summary = reports_dir / "workflow-summary.json"
+            quality_json = reports_dir / "kin-quality.json"
+            kin_file = tmp_path / "kin_2020001_good"
+
+            conn = sqlite3.connect(db_path)
+            conn.execute(
+                """
+                CREATE TABLE usgs_m6plus_events_earthscope_nonconus (
+                    event_id TEXT PRIMARY KEY,
+                    title TEXT,
+                    time_utc TEXT,
+                    event_date TEXT,
+                    magnitude REAL,
+                    longitude REAL,
+                    latitude REAL,
+                    depth_km REAL,
+                    place TEXT,
+                    usgs_url TEXT
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE event_earthscope_station_verified_files (
+                    event_id TEXT,
+                    station TEXT,
+                    station_latitude REAL,
+                    station_longitude REAL,
+                    distance_km REAL
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE event_earthscope_station_candidates (
+                    event_id TEXT,
+                    station TEXT,
+                    station_latitude REAL,
+                    station_longitude REAL,
+                    distance_km REAL
+                )
+                """
+            )
+            conn.execute(
+                """
+                INSERT INTO usgs_m6plus_events_earthscope_nonconus
+                VALUES ('test-event', 'Test event', '2020-01-01T00:00:00.500000Z', '2020-01-01', 6.1, -100.0, 20.0, 10.0, 'Test place', '')
+                """
+            )
+            conn.execute(
+                """
+                INSERT INTO event_earthscope_station_candidates
+                VALUES ('test-event', 'GOOD', 20.1, -100.1, 15.0)
+                """
+            )
+            conn.commit()
+            conn.close()
+
+            kin_file.write_text("END OF HEADER\n58849 18 1000 2000 3000\n", encoding="utf-8")
+            manifests_dir.mkdir(parents=True)
+            reports_dir.mkdir(parents=True)
+            (manifests_dir / "kin-files.txt").write_text(f"{kin_file}\n", encoding="utf-8")
+            workflow_summary.write_text(
+                json.dumps({"event": {"id": "test-event", "time_utc": "2020-01-01T00:00:00Z"}}),
+                encoding="utf-8",
+            )
+            quality_json.write_text(
+                json.dumps({"stations": [{"station": "GOOD", "quality_status": "OK", "quality_flags": ""}], "summary": {}}),
+                encoding="utf-8",
+            )
+            args = type(
+                "Args",
+                (),
+                {
+                    "workflow_summary": workflow_summary,
+                    "quality_json": quality_json,
+                    "db": db_path,
+                    "normalized_root": normalized_root,
+                    "include_warn": True,
+                },
+            )()
+
+            result = normalize.write_outputs(
+                args,
+                normalize.load_json(workflow_summary),
+                normalize.load_json(quality_json),
+            )
+
+            with gzip.open(Path(result["normalized_event_dir"]) / "waveforms.csv.gz", "rt", encoding="utf-8", newline="") as handle:
+                waveform_rows = list(csv.DictReader(handle))
+            self.assertEqual(waveform_rows[0]["Time_UTC"], "2020-01-01T00:00:00Z")
+            self.assertEqual(waveform_rows[0]["Time_Offset_s"], "-0.500000")
 
 
 if __name__ == "__main__":

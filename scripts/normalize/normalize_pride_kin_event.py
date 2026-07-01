@@ -21,6 +21,8 @@ if str(QUALITY_DIR) not in sys.path:
 
 from compute_kin_quality import kin_to_enu, parse_utc, station_from_path
 
+ROOT = Path(__file__).resolve().parents[2]
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -34,6 +36,45 @@ def parse_args() -> argparse.Namespace:
 
 def load_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def workflow_root(summary: dict) -> Path:
+    value = str(summary.get("paths", {}).get("root") or "").strip()
+    if value and value != "@ROOT@":
+        return Path(value).expanduser()
+    return ROOT
+
+
+def resolve_workflow_path(value: str | Path, summary: dict, workflow_summary: Path) -> Path:
+    text = str(value).strip()
+    root = workflow_root(summary)
+    if not text:
+        return Path()
+    if text == "@ROOT@":
+        return root
+    if text.startswith("@ROOT@/"):
+        return root / text[len("@ROOT@/") :]
+    path = Path(text).expanduser()
+    if not path.is_absolute():
+        return root / path
+    if path.exists():
+        return path
+    marker = "/gnss-earthscope-pipeline/"
+    if marker in text:
+        return root / text.split(marker, 1)[1]
+    return path
+
+
+def unique_paths(paths: list[Path]) -> list[Path]:
+    seen: set[str] = set()
+    result: list[Path] = []
+    for path in paths:
+        key = str(path)
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(path)
+    return result
 
 
 def slug_part(value: object) -> str:
@@ -195,7 +236,7 @@ def event_grade(station_rows: list[dict], azimuth_bin_count: int = 8) -> dict[st
 def normalization_metadata(include_warn: bool) -> dict[str, object]:
     return {
         "coordinate_transform": "ECEF XYZ minus reference position, then rotated to local ENU",
-        "coordinate_frame": "PRIDE kin_* input frame inherited from processing products; output components are local ENU",
+        "coordinate_frame": "PRIDE kin_* input frame inherited from processing products; kin epochs are interpreted as GPST and exported as UTC; output components are local ENU",
         "reference_position": "median ECEF position over all pre-event epochs; fallback to first 300 epochs when no pre-event data exists",
         "reference_epoch": "event-relative pre-event window, not a single epoch",
         "input_units": "PRIDE kin_* coordinates in meters; intermediate ENU displacement in centimeters",
@@ -302,6 +343,22 @@ def event_json(
     }
 
 
+def workflow_kin_files(summary: dict, workflow_summary: Path) -> list[Path]:
+    kin_files = [resolve_workflow_path(path, summary, workflow_summary) for path in summary.get("files", {}).get("kin", [])]
+    if kin_files:
+        return unique_paths(kin_files)
+    manifest = workflow_summary.parent.parent / "manifests" / "kin-files.txt"
+    if manifest.exists():
+        return unique_paths(
+            [
+                resolve_workflow_path(line.strip(), summary, workflow_summary)
+                for line in manifest.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+        )
+    return []
+
+
 def write_outputs(args: argparse.Namespace, summary: dict, quality: dict) -> dict:
     workflow_event = summary.get("event", {})
     event_id = str(workflow_event.get("id") or summary.get("event_id") or "").strip()
@@ -309,21 +366,20 @@ def write_outputs(args: argparse.Namespace, summary: dict, quality: dict) -> dic
     if not event_id or not event_time_text:
         raise SystemExit("Workflow summary is missing event.id or event.time_utc")
 
-    event_time = parse_utc(event_time_text)
     conn = connect_db(args.db)
     try:
         event = read_event(conn, event_id, event_time_text)
         metadata = read_station_metadata(conn, event_id)
     finally:
         conn.close()
+    event_time = parse_utc(str(event.get("time_utc") or event_time_text))
 
     quality_by_station = quality_station_map(quality, args.include_warn)
     if not quality_by_station:
         raise SystemExit("No quality-passing stations to normalize")
 
-    kin_files = [Path(path) for path in summary.get("files", {}).get("kin", [])]
     selected = []
-    for kin_file in kin_files:
+    for kin_file in workflow_kin_files(summary, args.workflow_summary):
         station = station_from_path(kin_file)
         if station in quality_by_station:
             selected.append((station, kin_file))
