@@ -29,6 +29,8 @@ env/
 *_secret*
 *credentials*
 *credential*
+docker-home/
+external/
 
 # Claude/local agent session, index, and config files
 .claude/
@@ -51,6 +53,7 @@ scripts/*
 !scripts/plotting/
 !scripts/cli/
 !scripts/pgd_magnitude/
+!scripts/summaries/
 !scripts/workflows/*
 !scripts/database/*
 !scripts/availability/*
@@ -59,13 +62,20 @@ scripts/*
 !scripts/plotting/*
 !scripts/cli/*
 !scripts/pgd_magnitude/*
+!scripts/summaries/*
 tools/earthscope_downloader/
 tools/geonet_downloader/
 tools/renag_downloader/
 tools/ring_downloader/
 
 # Local pipeline data and generated products
-data/
+data/*
+!data/summaries/
+data/summaries/*
+!data/summaries/us_current_event_completion.tsv
+!data/summaries/nz_current_event_completion.tsv
+!data/summaries/us_nz_current_event_completion.tsv
+!data/summaries/au_current_event_completion.tsv
 runs/
 exports/
 figure/
