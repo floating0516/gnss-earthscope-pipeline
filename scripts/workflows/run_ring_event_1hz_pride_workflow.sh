@@ -29,8 +29,7 @@ Options:
   --allow-partial           Continue PRIDE with available stations when some stations fail
   --merge-method METHOD     auto, gfzrnx, or python. Default: auto
   --skip-process            Download only, do not run PRIDE
-  --skip-plot               Do not generate ENU SVG plots
-  --post-seconds N          Post-event detail plot window. Default: 200
+  --skip-plot               Do not generate final normalized map/waveform figures
   --cleanup-downloads       After a successful workflow, remove compressed/raw downloader intermediates (default: on)
   --cleanup-pride-workdir   After plots/quality, remove bulky reproducible PRIDE workdir files (default: on)
   --cleanup-obs             After successful kin generation, remove data/obs/<event-id> files (default: on)
@@ -43,7 +42,6 @@ Directory layout:
     pride/                         PRIDE run directories
     logs/                          stdout/stderr logs for each stage
     manifests/                     station and observation file inventories
-    plots/enu/                     ENU SVG plots from PRIDE kin_* files
     reports/                       workflow-summary.json/.tsv/.md
 
 Canonical combined observation files are written to:
@@ -56,7 +54,6 @@ PIPELINE_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 DOWNLOADER="${PIPELINE_ROOT}/tools/ring_downloader/fetch_ring_highrate.py"
 PRIDE_PROCESSOR="${PIPELINE_ROOT}/tools/pride_processor/process_event_window.sh"
 PRIDE_CLEANER="${PIPELINE_ROOT}/tools/pride_processor/cleanup_pride_workdir.sh"
-PLOTTER="${PIPELINE_ROOT}/tools/pride_processor/plot_enu_svg.py"
 QUALITY_SCRIPT="${PIPELINE_ROOT}/scripts/quality/compute_kin_quality.py"
 
 absolute_path() {
@@ -79,7 +76,6 @@ FORCE_DOWNLOAD="0"
 ALLOW_PARTIAL="0"
 SKIP_PROCESS="0"
 SKIP_PLOT="0"
-POST_SECONDS="200"
 CLEANUP_DOWNLOADS="1"
 CLEANUP_PRIDE_WORKDIR="1"
 CLEANUP_OBS="1"
@@ -133,7 +129,7 @@ while [[ $# -gt 0 ]]; do
     --merge-method) MERGE_METHOD="$2"; shift 2 ;;
     --skip-process) SKIP_PROCESS="1"; shift ;;
     --skip-plot) SKIP_PLOT="1"; shift ;;
-    --post-seconds) POST_SECONDS="$2"; shift 2 ;;
+    --post-seconds) shift 2 ;; # Deprecated compatibility option.
     --cleanup-downloads) CLEANUP_DOWNLOADS="1"; shift ;;
     --cleanup-pride-workdir) CLEANUP_PRIDE_WORKDIR="1"; shift ;;
     --cleanup-obs) CLEANUP_OBS="1"; shift ;;
@@ -192,11 +188,6 @@ if [[ ! -x "$PRIDE_CLEANER" ]]; then
   echo "PRIDE cleaner not found or not executable: $PRIDE_CLEANER" >&2
   exit 1
 fi
-if [[ ! -x "$PLOTTER" ]]; then
-  echo "ENU plot script not found or not executable: $PLOTTER" >&2
-  exit 1
-fi
-
 event_epoch="$(date -u -d "$EVENT_TIME" +%s)"
 EVENT_TIME_UTC="$(date -u -d "@${event_epoch}" +%Y-%m-%dT%H:%M:%SZ)"
 if [[ -z "$YEAR" ]]; then
@@ -215,7 +206,6 @@ PRIDE_RUN_ROOT="${WORKFLOW_DIR}/pride"
 LOG_DIR="${WORKFLOW_DIR}/logs"
 MANIFEST_DIR="${WORKFLOW_DIR}/manifests"
 REPORT_DIR="${WORKFLOW_DIR}/reports"
-PLOTS_DIR="${WORKFLOW_DIR}/plots/enu"
 OBS_DIR="${OBS_ROOT}/${EVENT_ID}"
 
 if [[ "$SKIP_DOWNLOAD" == "0" && "${#STATIONS[@]}" -eq 0 ]]; then
@@ -269,7 +259,7 @@ if [[ "$DRY_RUN" == "1" ]]; then
   exit 0
 fi
 
-mkdir -p "$DOWNLOAD_DIR" "$PRIDE_RUN_ROOT" "$LOG_DIR" "$MANIFEST_DIR" "$REPORT_DIR" "$PLOTS_DIR" "$OBS_DIR"
+mkdir -p "$DOWNLOAD_DIR" "$PRIDE_RUN_ROOT" "$LOG_DIR" "$MANIFEST_DIR" "$REPORT_DIR" "$OBS_DIR"
 workflow_start_epoch="$(date -u +%s)"
 
 {
@@ -461,30 +451,7 @@ if [[ "$SKIP_PROCESS" == "1" && "$process_status" == "SKIPPED" && "$kin_count" !
   process_status="REUSED"
 fi
 
-if [[ "$SKIP_PLOT" == "0" ]]; then
-  if (( kin_count == 0 )); then
-    plot_status="SKIPPED_NO_KIN"
-  else
-    echo
-    echo "Running ENU plot stage..."
-    mapfile -t kin_files < "${MANIFEST_DIR}/kin-files.txt"
-    if "$PLOTTER" --event-time "$EVENT_TIME_UTC" --post-seconds "$POST_SECONDS" --out-dir "$PLOTS_DIR" "${kin_files[@]}" > "${LOG_DIR}/plot-enu.log" 2>&1; then
-      plot_status="OK"
-    else
-      plot_status="FAIL"
-    fi
-  fi
-fi
-
 : > "${MANIFEST_DIR}/plot-files.txt"
-if [[ -s "${MANIFEST_DIR}/kin-files.txt" ]]; then
-  while IFS= read -r kin_file; do
-    kin_name="$(basename "$kin_file")"
-    station="${kin_name##*_}"
-    find "$PLOTS_DIR" -maxdepth 1 -type f \( -name "${station}_enu_full.svg" -o -name "${station}_enu_post${POST_SECONDS}s.svg" \) >> "${MANIFEST_DIR}/plot-files.txt"
-  done < "${MANIFEST_DIR}/kin-files.txt"
-  sort -u -o "${MANIFEST_DIR}/plot-files.txt" "${MANIFEST_DIR}/plot-files.txt"
-fi
 plot_count="$(wc -l < "${MANIFEST_DIR}/plot-files.txt" | tr -d ' ')"
 
 KIN_QUALITY_TSV="${REPORT_DIR}/kin-quality.tsv"
@@ -600,7 +567,6 @@ duration_seconds=$((workflow_end_epoch - workflow_start_epoch))
   printf 'download_dir\t%s\n' "$DOWNLOAD_DIR"
   printf 'obs_dir\t%s\n' "$OBS_DIR"
   printf 'pride_run_root\t%s\n' "$PRIDE_RUN_ROOT"
-  printf 'plots_dir\t%s\n' "$PLOTS_DIR"
   printf 'kin_quality_tsv\t%s\n' "$KIN_QUALITY_TSV"
   printf 'kin_quality_json\t%s\n' "$KIN_QUALITY_JSON"
   printf 'pride_summary\t%s\n' "$latest_pride_summary"
@@ -608,7 +574,7 @@ duration_seconds=$((workflow_end_epoch - workflow_start_epoch))
 
 WORKFLOW_JSON="${REPORT_DIR}/workflow-summary.json"
 export EVENT_ID EVENT_TIME_UTC YEAR DOY HOURS INTERVAL MERGE_METHOD download_status process_status plot_status quality_status obs_validation_status cleanup_status pride_cleanup_status obs_cleanup_status duration_seconds
-export WORKFLOW_DIR DOWNLOAD_DIR OBS_DIR PRIDE_RUN_ROOT PLOTS_DIR LOG_DIR MANIFEST_DIR REPORT_DIR latest_pride_summary
+export WORKFLOW_DIR DOWNLOAD_DIR OBS_DIR PRIDE_RUN_ROOT LOG_DIR MANIFEST_DIR REPORT_DIR latest_pride_summary
 export REQUESTED_STATION_COUNT="${#STATIONS[@]}" OBS_COUNT="$obs_count" KIN_COUNT="$kin_count" PLOT_COUNT="$plot_count"
 export KIN_QUALITY_TSV KIN_QUALITY_JSON
 
@@ -684,7 +650,6 @@ summary = {
         "download_dir": os.environ["DOWNLOAD_DIR"],
         "obs_dir": os.environ["OBS_DIR"],
         "pride_run_root": os.environ["PRIDE_RUN_ROOT"],
-        "plots_dir": os.environ["PLOTS_DIR"],
         "logs_dir": os.environ["LOG_DIR"],
         "manifests_dir": os.environ["MANIFEST_DIR"],
         "reports_dir": os.environ["REPORT_DIR"],
@@ -729,7 +694,6 @@ PY
   printf '%s\n' "- PRIDE runs: \`${PRIDE_RUN_ROOT}\`"
   printf '%s\n' "- Logs: \`${LOG_DIR}\`"
   printf '%s\n' "- Manifests: \`${MANIFEST_DIR}\`"
-  printf '%s\n' "- ENU plots: \`${PLOTS_DIR}\`"
   printf '%s\n' "- Reports: \`${REPORT_DIR}\`"
   printf '%s\n' "- JSON summary: \`${WORKFLOW_JSON}\`"
 } > "${REPORT_DIR}/workflow-summary.md"
@@ -750,13 +714,27 @@ if [[ "$SKIP_PLOT" == "0" && "$download_status" != "FAIL" && "$process_status" !
     FINAL_PLOT_PYTHON="python3"
   fi
   if "$FINAL_PLOT_PYTHON" "${PIPELINE_ROOT}/scripts/plotting/plot_completed_normalized_event.py" --workflow-summary "$WORKFLOW_JSON" --normalized-root "$FINAL_NORMALIZED_ROOT" --outdir "$FINAL_FIGURE_DIR" > "${LOG_DIR}/plot-final-normalized.log" 2>&1; then
-    final_plot_status="OK"
+    python3 "${PIPELINE_ROOT}/scripts/workflows/update_workflow_summary_status.py" \
+      --extract-plot-files-from-log "${LOG_DIR}/plot-final-normalized.log" \
+      --write-plot-files "${MANIFEST_DIR}/plot-files.txt"
+    plot_count="$(grep -cve '^$' "${MANIFEST_DIR}/plot-files.txt" || true)"
+    if (( plot_count > 0 )); then
+      final_plot_status="OK"
+    else
+      final_plot_status="SKIPPED_NO_NORMALIZED_EVENT"
+    fi
   else
     final_plot_status="FAIL"
     echo "Final normalized plotting failed. See ${LOG_DIR}/plot-final-normalized.log" >&2
   fi
+  python3 "${PIPELINE_ROOT}/scripts/workflows/update_workflow_summary_status.py" \
+    --summary-json "$WORKFLOW_JSON" \
+    --summary-tsv "${REPORT_DIR}/workflow-summary.tsv" \
+    --summary-md "${REPORT_DIR}/workflow-summary.md" \
+    --plot-status "$final_plot_status" \
+    --plot-files "${MANIFEST_DIR}/plot-files.txt"
 fi
 
-if [[ "$download_status" == "FAIL" || "$process_status" == "FAIL" || "$process_status" == "BLOCKED_OBS_VALIDATION" || "$plot_status" == "FAIL" || "$quality_status" == "FAIL" || "$pride_cleanup_status" == "FAIL" || "$obs_cleanup_status" == "FAIL" || "$final_plot_status" == "FAIL" ]]; then
+if [[ "$download_status" == "FAIL" || "$process_status" == "FAIL" || "$process_status" == "BLOCKED_OBS_VALIDATION" || "$quality_status" == "FAIL" || "$pride_cleanup_status" == "FAIL" || "$obs_cleanup_status" == "FAIL" || "$final_plot_status" == "FAIL" ]]; then
   exit 1
 fi

@@ -35,8 +35,7 @@ Forwarded workflow options:
   --force-download          Download again even if valid obs files already exist
   --no-allow-partial        Do not pass --allow-partial. Batch default is partial allowed.
   --skip-process            Download only, do not run PRIDE
-  --skip-plot               Do not generate ENU SVG plots
-  --post-seconds N          Post-event detail plot window. Default: 200
+  --skip-plot               Do not generate final normalized map/waveform figures
   --cleanup-downloads       Remove raw downloader intermediates after successful event workflow (default: on)
   --cleanup-pride-workdir   Remove bulky reproducible PRIDE workdir files after each event workflow (default: on)
   --cleanup-obs             Remove data/obs/<event-id> files after successful kin generation (default: on)
@@ -106,7 +105,6 @@ SKIP_DOWNLOAD="0"
 FORCE_DOWNLOAD="0"
 SKIP_PROCESS="0"
 SKIP_PLOT="0"
-POST_SECONDS="200"
 CLEANUP_DOWNLOADS="1"
 CLEANUP_PRIDE_WORKDIR="1"
 CLEANUP_OBS="1"
@@ -179,8 +177,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --post-seconds)
-      POST_SECONDS="$2"
-      shift 2
+      shift 2 # Deprecated compatibility option.
       ;;
     --cleanup-downloads)
       CLEANUP_DOWNLOADS="1"
@@ -481,7 +478,6 @@ while IFS=$'\t' read -r row_index event_id event_time stations; do
     --run-root "$RUN_ROOT"
     --obs-root "$OBS_ROOT"
     --normalize-db "$NORMALIZE_DB"
-    --post-seconds "$POST_SECONDS"
   )
   if (( MAX_STATIONS > 0 )); then
     cmd+=(--max-stations "$MAX_STATIONS")

@@ -33,7 +33,6 @@ Options:
   --ga-api-url URL          GA RINEX API URL override
   --skip-process            Download only, do not run PRIDE
   --skip-plot               Do not generate final normalized map/waveform figures
-  --post-seconds N          Post-event detail plot window. Default: 200
   --cleanup-downloads       After kin generation, remove compressed/raw downloader intermediates (default: on)
   --cleanup-pride-workdir   After kin generation, remove bulky reproducible PRIDE workdir files (default: on)
   --cleanup-obs             After kin generation, remove data/obs/<event-id> files (default: on)
@@ -83,7 +82,6 @@ FORCE_DOWNLOAD="0"
 ALLOW_PARTIAL="0"
 SKIP_PROCESS="0"
 SKIP_PLOT="0"
-POST_SECONDS="200"
 CLEANUP_DOWNLOADS="1"
 CLEANUP_PRIDE_WORKDIR="1"
 CLEANUP_OBS="1"
@@ -206,8 +204,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --post-seconds)
-      POST_SECONDS="$2"
-      shift 2
+      shift 2 # Deprecated compatibility option.
       ;;
     --cleanup-downloads)
       CLEANUP_DOWNLOADS="1"
@@ -325,7 +322,6 @@ LOG_DIR="${WORKFLOW_DIR}/logs"
 MANIFEST_DIR="${WORKFLOW_DIR}/manifests"
 REPORT_DIR="${WORKFLOW_DIR}/reports"
 WORKFLOW_JSON="${REPORT_DIR}/workflow-summary.json"
-PLOTS_DIR="${WORKFLOW_DIR}/plots/enu"
 OBS_DIR="${OBS_ROOT}/${EVENT_ID}"
 
 if [[ "$SKIP_DOWNLOAD" == "0" && "${#STATIONS[@]}" -eq 0 ]]; then
@@ -388,7 +384,7 @@ if [[ "$DRY_RUN" == "1" ]]; then
   exit 0
 fi
 
-mkdir -p "$DOWNLOAD_DIR" "$PRIDE_RUN_ROOT" "$LOG_DIR" "$MANIFEST_DIR" "$REPORT_DIR" "$PLOTS_DIR" "$OBS_DIR"
+mkdir -p "$DOWNLOAD_DIR" "$PRIDE_RUN_ROOT" "$LOG_DIR" "$MANIFEST_DIR" "$REPORT_DIR" "$OBS_DIR"
 workflow_start_epoch="$(date -u +%s)"
 
 {
@@ -945,7 +941,6 @@ PY
   printf 'download_dir\t%s\n' "$DOWNLOAD_DIR"
   printf 'obs_dir\t%s\n' "$OBS_DIR"
   printf 'pride_run_root\t%s\n' "$PRIDE_RUN_ROOT"
-  printf 'plots_dir\t%s\n' "$PLOTS_DIR"
   printf 'kin_quality_tsv\t%s\n' "$KIN_QUALITY_TSV"
   printf 'kin_quality_json\t%s\n' "$KIN_QUALITY_JSON"
   printf 'pride_summary\t%s\n' "$latest_pride_summary"
@@ -953,7 +948,7 @@ PY
 
 WORKFLOW_JSON="${REPORT_DIR}/workflow-summary.json"
 export EVENT_ID EVENT_TIME_UTC YEAR DOY HOURS INTERVAL PROCESS_JOBS MERGE_METHOD DOWNLOAD_SLOT_WINDOW DOWNLOAD_HOURS download_window_mode download_window_start_utc download_window_end_utc required_slots_utc pride_window_start_utc pride_window_end_utc download_status process_status plot_status quality_status obs_validation_status cleanup_status pride_cleanup_status obs_cleanup_status normalized_status normalized_event_dir normalized_station_count normalized_waveform_rows normalized_event_grade normalized_azimuth_bins_covered duration_seconds
-export WORKFLOW_DIR DOWNLOAD_DIR OBS_DIR PRIDE_RUN_ROOT PLOTS_DIR LOG_DIR MANIFEST_DIR REPORT_DIR latest_pride_summary
+export WORKFLOW_DIR DOWNLOAD_DIR OBS_DIR PRIDE_RUN_ROOT LOG_DIR MANIFEST_DIR REPORT_DIR latest_pride_summary
 export OBS_VALIDATION_FILE="${MANIFEST_DIR}/obs-validation.tsv"
 export OBS_FILES_FILE="${MANIFEST_DIR}/obs-files.txt"
 export KIN_FILES_FILE="${MANIFEST_DIR}/kin-files.txt"
@@ -1071,7 +1066,6 @@ summary = {
         "download_dir": os.environ["DOWNLOAD_DIR"],
         "obs_dir": os.environ["OBS_DIR"],
         "pride_run_root": os.environ["PRIDE_RUN_ROOT"],
-        "plots_dir": os.environ["PLOTS_DIR"],
         "logs_dir": os.environ["LOG_DIR"],
         "manifests_dir": os.environ["MANIFEST_DIR"],
         "reports_dir": os.environ["REPORT_DIR"],

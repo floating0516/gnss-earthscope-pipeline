@@ -93,8 +93,8 @@ EarthScope/GAGE 确实包含世界各地的 GNSS 台站，但用于 1 Hz high-ra
 - 每个数据源有自己的事件候选 CSV 或 manifest，字段可以对齐最终工作流需要的通用字段，但不要复用带有 EarthScope 语义的文件名或状态列含义。
 - 可以复用真正与数据源无关的模块：
   - `tools/pride_processor/process_event_window.sh`：只依赖本地 RINEX obs 文件和事件时间，适合作为后处理入口。
-  - `tools/pride_processor/plot_enu_svg.py`：只处理 PRIDE 输出结果，适合复用。
   - `scripts/quality/compute_kin_quality.py`：如果输入仍是同一类 PRIDE kin 输出，可复用。
+  - `scripts/plotting/plot_completed_normalized_event.py`：基于 normalized 事件输出最终地图和波形图。
 - 不建议直接复用的模块：
   - `tools/earthscope_downloader/*`：包含 EarthScope/GAGE URL、token、目录、RINEX 命名和产品查询假设。
   - `scripts/availability/update_earthscope_availability.py`：绑定 EarthScope high-rate 目录和 SQLite schema。
@@ -195,8 +195,8 @@ EarthScope/GAGE 确实包含世界各地的 GNSS 台站，但用于 1 Hz high-ra
 - 结论：GeoNet 历史 1 Hz RINEX 可以下载，但覆盖是事件归档式的，不是所有历史 M6+ 每日连续覆盖。下载器需要新增 `event.highrate` 分支，支持列 `1hz/rinex/<year>/<doy>/`，并兼容三类文件形态：早期 RINEX 2 Hatanaka `*.d.Z`、2021 年样式的 RINEX 2 观测文件 `*.o.gz`、2025 年样式的 RINEX 3 `*_01S_MO.rnx.gz`。其中 `*.d.Z` 需要 `uncompress` 加 `crx2rnx`，`*.o.gz` 和 `*.rnx.gz` 主要是 gzip 解压后进入现有 PRIDE 后处理。
 - 处理窗口策略，2026-04-29：GeoNet historical `event.highrate` 不能默认套用美国事件的 `±3h`。实测 `2015p305812` 的 `KAIK/HANM/MTJO` 文件只有 `03:00:00Z` 到 `03:59:59Z` 的 1 小时覆盖；现在 workflow 在 `--download-source event-highrate` 且未显式传 `--hours` 时，会从 RINEX epoch 自动估计共同覆盖，并把该事件收缩为 `±0.387778h`，PRIDE、绘图和质量统计均为 `OK`。若用户显式传 `--hours`，则尊重用户设置；可用 `--no-auto-hours` 关闭自动收缩。
 - 端到端测试，2026-04-29：
-  - `2015p305812`，台站 `KAIK HANM MTJO`，`--download-source event-highrate --process-jobs 2 --skip-download`，自动窗口 `0.387778h`，生成 3 个 kin、6 张 ENU 图，`download_status=REUSED`、`process_status=OK`、`plot_status=OK`、`quality_status=OK`。
-  - `2025p224518`，台站 `PYGR BLUF MAVL`，`--download-source event-highrate --process-jobs 2 --hours 1`，生成 3 个 obs、3 个 kin、6 张 ENU 图，下载、PRIDE、绘图、质量统计全 `OK`。
+  - `2015p305812`，台站 `KAIK HANM MTJO`，`--download-source event-highrate --process-jobs 2 --skip-download`，自动窗口 `0.387778h`，生成 3 个 kin，`download_status=REUSED`、`process_status=OK`、`quality_status=OK`。
+  - `2025p224518`，台站 `PYGR BLUF MAVL`，`--download-source event-highrate --process-jobs 2 --hours 1`，生成 3 个 obs、3 个 kin，下载、PRIDE 和质量统计全 `OK`；当前图件由 normalized final plotter 生成。
 
 GeoNet 单事件示例：
 

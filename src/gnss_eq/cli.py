@@ -74,7 +74,7 @@ def add_common_workflow_flags(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--force-download", action="store_true")
     parser.add_argument("--skip-process", action="store_true")
     parser.add_argument("--skip-plot", action="store_true")
-    parser.add_argument("--post-seconds", default="200")
+    parser.add_argument("--post-seconds", default=None, help=argparse.SUPPRESS)
     parser.add_argument("--cleanup-downloads", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--cleanup-pride-workdir", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--cleanup-obs", action=argparse.BooleanOptionalAction, default=True)
@@ -101,8 +101,6 @@ def cmd_run_event(args: argparse.Namespace) -> int:
         obs_root,
         "--normalize-db",
         normalize_db,
-        "--post-seconds",
-        args.post_seconds,
         "--process-jobs",
         str(args.process_jobs),
     ]
@@ -161,8 +159,6 @@ def cmd_run_batch(args: argparse.Namespace) -> int:
         obs_root,
         "--normalize-db",
         normalize_db,
-        "--post-seconds",
-        args.post_seconds,
         "--process-jobs",
         str(args.process_jobs),
     ]
