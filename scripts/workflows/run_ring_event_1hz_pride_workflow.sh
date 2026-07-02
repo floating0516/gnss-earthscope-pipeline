@@ -274,6 +274,11 @@ process_status="SKIPPED"
 plot_status="SKIPPED"
 quality_status="SKIPPED"
 obs_validation_status="SKIPPED"
+normalized_status="SKIPPED_UNSUPPORTED_SOURCE"
+normalized_station_count="0"
+normalized_waveform_rows="0"
+normalized_event_grade=""
+normalized_event_dir=""
 
 write_obs_inventory() {
   find "$OBS_DIR" -maxdepth 1 -type f \( -name "*.rnx" -o -name "*.[0-9][0-9]o" -o -name "*.obs" \) \
@@ -554,6 +559,11 @@ duration_seconds=$((workflow_end_epoch - workflow_start_epoch))
   printf 'process_status\t%s\n' "$process_status"
   printf 'plot_status\t%s\n' "$plot_status"
   printf 'quality_status\t%s\n' "$quality_status"
+  printf 'normalized_status\t%s\n' "$normalized_status"
+  printf 'normalized_station_count\t%s\n' "$normalized_station_count"
+  printf 'normalized_waveform_rows\t%s\n' "$normalized_waveform_rows"
+  printf 'normalized_event_grade\t%s\n' "$normalized_event_grade"
+  printf 'normalized_event_dir\t%s\n' "$normalized_event_dir"
   printf 'obs_validation_status\t%s\n' "$obs_validation_status"
   printf 'cleanup_status\t%s\n' "$cleanup_status"
   printf 'pride_cleanup_status\t%s\n' "$pride_cleanup_status"
@@ -573,7 +583,7 @@ duration_seconds=$((workflow_end_epoch - workflow_start_epoch))
 } > "${REPORT_DIR}/workflow-summary.tsv"
 
 WORKFLOW_JSON="${REPORT_DIR}/workflow-summary.json"
-export EVENT_ID EVENT_TIME_UTC YEAR DOY HOURS INTERVAL MERGE_METHOD download_status process_status plot_status quality_status obs_validation_status cleanup_status pride_cleanup_status obs_cleanup_status duration_seconds
+export EVENT_ID EVENT_TIME_UTC YEAR DOY HOURS INTERVAL MERGE_METHOD download_status process_status plot_status quality_status obs_validation_status cleanup_status pride_cleanup_status obs_cleanup_status normalized_status normalized_station_count normalized_waveform_rows normalized_event_grade normalized_event_dir duration_seconds
 export WORKFLOW_DIR DOWNLOAD_DIR OBS_DIR PRIDE_RUN_ROOT LOG_DIR MANIFEST_DIR REPORT_DIR latest_pride_summary
 export REQUESTED_STATION_COUNT="${#STATIONS[@]}" OBS_COUNT="$obs_count" KIN_COUNT="$kin_count" PLOT_COUNT="$plot_count"
 export KIN_QUALITY_TSV KIN_QUALITY_JSON
@@ -634,6 +644,7 @@ summary = {
         "process": os.environ["process_status"],
         "plot": os.environ["plot_status"],
         "quality": os.environ["quality_status"],
+        "normalized": os.environ["normalized_status"],
         "cleanup": os.environ["cleanup_status"],
         "pride_cleanup": os.environ["pride_cleanup_status"],
         "obs_cleanup": os.environ["obs_cleanup_status"],
@@ -643,6 +654,8 @@ summary = {
         "obs_files": as_int(os.environ["OBS_COUNT"]),
         "kin_files": as_int(os.environ["KIN_COUNT"]),
         "plot_files": as_int(os.environ["PLOT_COUNT"]),
+        "normalized_stations": as_int(os.environ["normalized_station_count"]),
+        "normalized_waveform_rows": as_int(os.environ["normalized_waveform_rows"]),
     },
     "duration_seconds": as_int(os.environ["duration_seconds"]),
     "paths": {
@@ -656,6 +669,8 @@ summary = {
         "kin_quality_tsv": os.environ["KIN_QUALITY_TSV"],
         "kin_quality_json": os.environ["KIN_QUALITY_JSON"],
         "pride_summary": os.environ.get("latest_pride_summary", ""),
+        "normalized_event_dir": os.environ.get("normalized_event_dir", ""),
+        "normalized_event_grade": os.environ.get("normalized_event_grade", ""),
     },
     "ring_download": read_json(Path(os.environ["MANIFEST_DIR"]) / "ring-download-summary.json"),
     "obs_validation": read_tsv(Path(os.environ["MANIFEST_DIR"]) / "obs-validation.tsv"),
@@ -678,6 +693,7 @@ PY
   printf '%s\n' "- PRIDE status: \`${process_status}\`"
   printf '%s\n' "- Plot status: \`${plot_status}\`"
   printf '%s\n' "- Quality status: \`${quality_status}\`"
+  printf '%s\n' "- Normalized status: \`${normalized_status}\`"
   printf '%s\n' "- Obs validation: \`${obs_validation_status}\`"
   printf '%s\n' "- Cleanup status: \`${cleanup_status}\`"
   printf '%s\n' "- PRIDE cleanup status: \`${pride_cleanup_status}\`"
@@ -705,27 +721,34 @@ echo "Machine-readable summary: ${REPORT_DIR}/workflow-summary.tsv"
 
 final_plot_status="SKIPPED"
 if [[ "$SKIP_PLOT" == "0" && "$download_status" != "FAIL" && "$process_status" != "FAIL" && "$process_status" != "BLOCKED_OBS_VALIDATION" && "$quality_status" != "FAIL" ]]; then
-  echo
-  echo "Running final normalized plot stage..."
-  FINAL_NORMALIZED_ROOT="${FINAL_NORMALIZED_ROOT:-${PIPELINE_ROOT}/exports/normalized-ok-stations-us-nz}"
-  FINAL_FIGURE_DIR="${FINAL_FIGURE_DIR:-${PIPELINE_ROOT}/figure}"
-  FINAL_PLOT_PYTHON="${FINAL_PLOT_PYTHON:-${PIPELINE_ROOT}/.venv/bin/python}"
-  if [[ ! -x "$FINAL_PLOT_PYTHON" ]]; then
-    FINAL_PLOT_PYTHON="python3"
-  fi
-  if "$FINAL_PLOT_PYTHON" "${PIPELINE_ROOT}/scripts/plotting/plot_completed_normalized_event.py" --workflow-summary "$WORKFLOW_JSON" --normalized-root "$FINAL_NORMALIZED_ROOT" --outdir "$FINAL_FIGURE_DIR" > "${LOG_DIR}/plot-final-normalized.log" 2>&1; then
-    python3 "${PIPELINE_ROOT}/scripts/workflows/update_workflow_summary_status.py" \
-      --extract-plot-files-from-log "${LOG_DIR}/plot-final-normalized.log" \
-      --write-plot-files "${MANIFEST_DIR}/plot-files.txt"
-    plot_count="$(grep -cve '^$' "${MANIFEST_DIR}/plot-files.txt" || true)"
-    if (( plot_count > 0 )); then
-      final_plot_status="OK"
-    else
-      final_plot_status="SKIPPED_NO_NORMALIZED_EVENT"
-    fi
+  if [[ "$normalized_status" != "OK" ]]; then
+    final_plot_status="BLOCKED_NORMALIZE_UNSUPPORTED"
+    : > "${MANIFEST_DIR}/plot-files.txt"
+    echo
+    echo "Skipping final normalized plot stage: RING normalization is not implemented in this workflow."
   else
-    final_plot_status="FAIL"
-    echo "Final normalized plotting failed. See ${LOG_DIR}/plot-final-normalized.log" >&2
+    echo
+    echo "Running final normalized plot stage..."
+    FINAL_NORMALIZED_ROOT="${FINAL_NORMALIZED_ROOT:-${PIPELINE_ROOT}/exports/normalized-ok-stations-us-nz}"
+    FINAL_FIGURE_DIR="${FINAL_FIGURE_DIR:-${PIPELINE_ROOT}/figure}"
+    FINAL_PLOT_PYTHON="${FINAL_PLOT_PYTHON:-${PIPELINE_ROOT}/.venv/bin/python}"
+    if [[ ! -x "$FINAL_PLOT_PYTHON" ]]; then
+      FINAL_PLOT_PYTHON="python3"
+    fi
+    if "$FINAL_PLOT_PYTHON" "${PIPELINE_ROOT}/scripts/plotting/plot_completed_normalized_event.py" --workflow-summary "$WORKFLOW_JSON" --normalized-root "$FINAL_NORMALIZED_ROOT" --outdir "$FINAL_FIGURE_DIR" > "${LOG_DIR}/plot-final-normalized.log" 2>&1; then
+      python3 "${PIPELINE_ROOT}/scripts/workflows/update_workflow_summary_status.py" \
+        --extract-plot-files-from-log "${LOG_DIR}/plot-final-normalized.log" \
+        --write-plot-files "${MANIFEST_DIR}/plot-files.txt"
+      plot_count="$(grep -cve '^$' "${MANIFEST_DIR}/plot-files.txt" || true)"
+      if (( plot_count > 0 )); then
+        final_plot_status="OK"
+      else
+        final_plot_status="SKIPPED_NO_NORMALIZED_EVENT"
+      fi
+    else
+      final_plot_status="FAIL"
+      echo "Final normalized plotting failed. See ${LOG_DIR}/plot-final-normalized.log" >&2
+    fi
   fi
   python3 "${PIPELINE_ROOT}/scripts/workflows/update_workflow_summary_status.py" \
     --summary-json "$WORKFLOW_JSON" \
