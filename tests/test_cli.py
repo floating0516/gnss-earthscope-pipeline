@@ -481,6 +481,44 @@ class CliMonitorCommandTest(unittest.TestCase):
         self.assertTrue(captured_review_args[1].refresh_geonet)
         self.assertEqual(captured_review_args[1].event_id, ["us-earthscope", "us-geonet"])
 
+    def test_watch_usgs_review_new_events_skips_unsupported_south_america(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with patch.object(cli.usgs_watcher, "run_watch_loop", return_value=0) as run_watch_loop:
+                rc = cli.main(
+                    [
+                        "watch-usgs",
+                        "--once",
+                        "--review-new-events",
+                        "--review-dry-run",
+                        "--state-db",
+                        str(root / "watcher.sqlite"),
+                    ]
+                )
+
+            self.assertEqual(rc, 0)
+            callback = run_watch_loop.call_args.kwargs["on_new_events"]
+
+            with patch.object(cli, "_review_usgs", side_effect=AssertionError("review should not run")):
+                stderr = io.StringIO()
+                with redirect_stdout(io.StringIO()), redirect_stderr(stderr):
+                    callback(
+                        {
+                            "events": [
+                                {
+                                    "event_id": "us-chile",
+                                    "region": "americas",
+                                    "latitude": -30.0,
+                                    "longitude": -71.0,
+                                    "place": "near the coast of central Chile",
+                                }
+                            ]
+                        }
+                    )
+
+        self.assertIn("REVIEW\tSKIP", stderr.getvalue())
+        self.assertIn("unsupported_south_america", stderr.getvalue())
+
     def test_watch_usgs_review_new_events_continues_by_default_after_review_error(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

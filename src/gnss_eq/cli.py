@@ -792,9 +792,9 @@ def cmd_review_usgs(args: argparse.Namespace) -> int:
 def _review_source_for_new_events(watch_args: argparse.Namespace, events: list[dict[str, object]]) -> tuple[str, bool]:
     if watch_args.review_source != "auto":
         return watch_args.review_source, watch_args.review_refresh_geonet
-    regions = {str(event.get("region") or "") for event in events}
-    has_earthscope = "americas" in regions
-    has_geonet = "new_zealand" in regions
+    sources = {usgs_triage.processing_source_for_event(event) for event in events}
+    has_earthscope = "earthscope" in sources
+    has_geonet = "geonet" in sources
     if has_earthscope and has_geonet:
         return "all", True
     if has_geonet:
@@ -802,8 +802,16 @@ def _review_source_for_new_events(watch_args: argparse.Namespace, events: list[d
     return "earthscope", watch_args.review_refresh_geonet
 
 
-def _build_watch_review_args(watch_args: argparse.Namespace, result: dict[str, object]) -> argparse.Namespace:
-    events = [event for event in result.get("events", []) if isinstance(event, dict)]
+def _reviewable_watch_events(events: list[dict[str, object]]) -> list[dict[str, object]]:
+    reviewable = []
+    for event in events:
+        source = usgs_triage.processing_source_for_event(event)
+        if source in {"earthscope", "geonet"}:
+            reviewable.append(event)
+    return reviewable
+
+
+def _build_watch_review_args(watch_args: argparse.Namespace, events: list[dict[str, object]]) -> argparse.Namespace:
     event_ids = [str(event.get("event_id")) for event in events if event.get("event_id")]
     source, refresh_geonet = _review_source_for_new_events(watch_args, events)
     return argparse.Namespace(
@@ -937,12 +945,21 @@ def _process_high_earthscope_events(watch_args: argparse.Namespace, report: dict
 
 def _run_watch_review_for_new_events(watch_args: argparse.Namespace, result: dict[str, object]) -> int:
     events = [event for event in result.get("events", []) if isinstance(event, dict)]
-    event_ids = [str(event.get("event_id")) for event in events if event.get("event_id")]
+    reviewable_events = _reviewable_watch_events(events)
+    unsupported_ids = [
+        str(event.get("event_id"))
+        for event in events
+        if event.get("event_id") and usgs_triage.processing_source_for_event(event) == "unsupported_south_america"
+    ]
+    if events and not reviewable_events:
+        print(f"REVIEW\tSKIP\tsource=unsupported_south_america\tevents={','.join(unsupported_ids)}", file=sys.stderr)
+        return 0
+    event_ids = [str(event.get("event_id")) for event in reviewable_events if event.get("event_id")]
     if not event_ids:
         return 0
-    review_args = _build_watch_review_args(watch_args, result)
+    review_args = _build_watch_review_args(watch_args, reviewable_events)
     print(f"REVIEW\tSTART\tevents={','.join(event_ids)}\tsource={review_args.source}", file=sys.stderr)
-    _prefetch_watch_review_metadata(review_args, events)
+    _prefetch_watch_review_metadata(review_args, reviewable_events)
     with redirect_stdout(sys.stderr):
         exit_code, report = _review_usgs(review_args)
         _write_review_report(review_args, report)

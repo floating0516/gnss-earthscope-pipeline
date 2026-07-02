@@ -28,13 +28,13 @@ def create_watcher_db(path: Path) -> None:
             "2026-06-28T08:00:00Z",
             "2026-06-28T08:00:00Z",
             "2026-06-28T08:01:00Z",
-            10.4351,
-            -68.4716,
+            40.4,
+            -124.5,
             10.0,
             7.5,
             "mww",
-            "Yumare, Venezuela",
-            "M 7.5 - Yumare, Venezuela",
+            "near the coast of northern California",
+            "M 7.5 - near the coast of northern California",
             "https://earthquake.usgs.gov/earthquakes/eventpage/us-americas",
             "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=us-americas&format=geojson",
             "americas,nz",
@@ -173,6 +173,81 @@ class UsgsTriageTest(unittest.TestCase):
         self.assertEqual(report["events"][0]["priority"], "MEDIUM")
         self.assertEqual(report["events"][0]["suggested_action"], "REVIEW_PREPARE_BATCH")
         self.assertIn("run_geonet_batch_workflow.sh --help", "\n".join(report["events"][0]["suggested_commands"]))
+
+    def test_south_america_event_is_not_routed_to_earthscope(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            watcher_db = root / "watcher.sqlite"
+            create_watcher_db(watcher_db)
+            conn = sqlite3.connect(watcher_db)
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO usgs_watcher_events(
+                        event_id, event_time_utc, first_seen_utc, last_seen_utc, usgs_updated_utc,
+                        latitude, longitude, depth_km, magnitude, mag_type, place, title, usgs_url,
+                        detail_url, scope, region, raw_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        "us-chile",
+                        "2026-01-01T00:00:00Z",
+                        "2026-01-01T00:01:00Z",
+                        "2026-01-01T00:01:00Z",
+                        "2026-01-01T00:01:00Z",
+                        -30.0,
+                        -71.0,
+                        20.0,
+                        7.0,
+                        "mww",
+                        "near the coast of central Chile",
+                        "M 7.0 - near the coast of central Chile",
+                        "https://earthquake.usgs.gov/earthquakes/eventpage/us-chile",
+                        "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=us-chile&format=geojson",
+                        "americas,nz",
+                        "americas",
+                        "{}",
+                    ),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            report_all = usgs_triage.build_triage_report(
+                state_db=watcher_db,
+                source="all",
+                earthscope_db=root / "missing-earthscope.sqlite",
+                earthscope_nonconus_db=root / "missing-nonconus.sqlite",
+                geonet_db=root / "missing-geonet.sqlite",
+                runs_root=root / "runs",
+                limit=10,
+            )
+            report_earthscope = usgs_triage.build_triage_report(
+                state_db=watcher_db,
+                source="earthscope",
+                earthscope_db=root / "missing-earthscope.sqlite",
+                earthscope_nonconus_db=root / "missing-nonconus.sqlite",
+                geonet_db=root / "missing-geonet.sqlite",
+                runs_root=root / "runs",
+                limit=10,
+            )
+
+        south = [event for event in report_all["events"] if event["event_id"] == "us-chile"][0]
+        self.assertEqual(south["source"], "unsupported_south_america")
+        self.assertEqual(south["priority"], "SKIP")
+        self.assertEqual(south["suggested_action"], "CHECK_CDDIS_OR_OTHER_SOURCE")
+        self.assertNotIn("us-chile", [event["event_id"] for event in report_earthscope["events"]])
+
+    def test_venezuela_place_text_is_south_america_even_at_caribbean_latitude(self):
+        event = {
+            "region": "americas",
+            "latitude": 10.4351,
+            "longitude": -68.4716,
+            "place": "28 km SE of Yumare, Venezuela",
+            "title": "M 7.5 - 28 km SE of Yumare, Venezuela",
+        }
+
+        self.assertEqual(usgs_triage.processing_source_for_event(event), "unsupported_south_america")
 
     def test_missing_watcher_db_is_graceful_and_read_only(self):
         with tempfile.TemporaryDirectory() as tmp:

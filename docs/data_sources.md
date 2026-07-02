@@ -27,6 +27,7 @@ The current repository layout intentionally keeps source-specific scripts in the
 ## Operational boundaries
 
 - EarthScope/GAGE and GeoNet are the maintained workflow lines to use for new processing work.
+- USGS watcher regions are broad discovery regions. `americas` is not equivalent to EarthScope processability: triage reclassifies South America events as unsupported by the current EarthScope workflow and suggests CDDIS or another global source review instead.
 - CDDIS may be used for research experiments and validation, but it should be described as experimental in reports and workflow notes.
 - GA, RING, EPOS, and RENAG code should remain available for reference, but new work should not default to those sources unless the research focus changes.
 - `source="paper"` is a read-only comparison/reference source.

@@ -42,6 +42,22 @@ TRIAGE_FIELDS = [
 ]
 
 PRIORITY_RANK = {"HIGH": 0, "MEDIUM": 1, "LOW": 2, "SKIP": 3, "UNKNOWN": 4}
+SOUTH_AMERICA_PLACE_TERMS = (
+    "argentina",
+    "bolivia",
+    "brazil",
+    "chile",
+    "colombia",
+    "ecuador",
+    "falkland",
+    "french guiana",
+    "guyana",
+    "paraguay",
+    "peru",
+    "suriname",
+    "uruguay",
+    "venezuela",
+)
 
 
 def _display_path(path: Path) -> str:
@@ -88,11 +104,36 @@ def _empty_counts() -> dict[str, int]:
     }
 
 
-def _source_for_region(region: str) -> str:
-    if region == "americas":
-        return "earthscope"
+def _event_text(event: dict[str, Any]) -> str:
+    return " ".join(str(event.get(key) or "") for key in ("place", "title")).lower()
+
+
+def _event_float(event: dict[str, Any], key: str) -> float | None:
+    try:
+        return float(event.get(key))
+    except (TypeError, ValueError):
+        return None
+
+
+def _is_south_america_event(event: dict[str, Any]) -> bool:
+    text = _event_text(event)
+    if any(term in text for term in SOUTH_AMERICA_PLACE_TERMS):
+        return True
+    latitude = _event_float(event, "latitude")
+    longitude = _event_float(event, "longitude")
+    if latitude is None or longitude is None:
+        return False
+    return -60.0 <= latitude <= 5.0 and -82.0 <= longitude <= -34.0
+
+
+def processing_source_for_event(event: dict[str, Any]) -> str:
+    region = str(event.get("region") or "")
     if region == "new_zealand":
         return "geonet"
+    if region == "americas":
+        if _is_south_america_event(event):
+            return "unsupported_south_america"
+        return "earthscope"
     return "unknown"
 
 
@@ -251,7 +292,9 @@ def _geonet_availability_index(geonet_db: Path) -> tuple[dict[str, dict[str, Any
     return index, []
 
 
-def _priority(stations_200km: int, workflow_status: str, existing_data_status: str) -> str:
+def _priority(source: str, stations_200km: int, workflow_status: str, existing_data_status: str) -> str:
+    if source == "unsupported_south_america":
+        return "SKIP"
     if workflow_status == "WORKFLOW_EXISTS" or existing_data_status == "HAS_NORMALIZED":
         return "SKIP"
     if stations_200km >= 20:
@@ -261,7 +304,9 @@ def _priority(stations_200km: int, workflow_status: str, existing_data_status: s
     return "LOW"
 
 
-def _suggested_action(priority: str, workflow_status: str, availability: dict[str, Any] | None, db_available: bool) -> str:
+def _suggested_action(priority: str, workflow_status: str, availability: dict[str, Any] | None, db_available: bool, source: str) -> str:
+    if source == "unsupported_south_america":
+        return "CHECK_CDDIS_OR_OTHER_SOURCE"
     if workflow_status == "WORKFLOW_EXISTS":
         return "SKIP_WORKFLOW_EXISTS"
     if not db_available:
@@ -279,6 +324,8 @@ def _workflow_status(event_id: str, workflow_ids: set[str]) -> str:
 
 def _reason(event: dict[str, Any]) -> str:
     action = event.get("suggested_action")
+    if action == "CHECK_CDDIS_OR_OTHER_SOURCE":
+        return "South America is outside the current EarthScope processing coverage; review CDDIS or another global source"
     if action == "SKIP_WORKFLOW_EXISTS":
         return "workflow output already exists"
     if action == "CHECK_LOCAL_DB":
@@ -312,6 +359,12 @@ def _suggested_commands(event: dict[str, Any]) -> list[str]:
             "scripts/workflows/run_geonet_event_1hz_pride_workflow.sh --help",
             "scripts/workflows/run_geonet_batch_workflow.sh --help",
         ]
+    if source == "unsupported_south_america":
+        return [
+            "python3 scripts/database/import_usgs_events_to_cddis.py --min-magnitude 6.0",
+            f"python3 scripts/availability/rebuild_cddis_event_station_candidates.py --event-id {event_id} --clear-event",
+            "scripts/workflows/run_cddis_event_batch_workflow.sh --help",
+        ]
     return ["gnss-eq monitor --source all --format tsv"]
 
 
@@ -323,7 +376,7 @@ def _triage_event(
     db_available: dict[str, bool],
     workflow_ids: set[str],
 ) -> dict[str, Any]:
-    source = _source_for_region(str(event.get("region") or ""))
+    source = processing_source_for_event(event)
     availability = None
     if source == "earthscope":
         availability = earthscope_index.get(str(event["event_id"]))
@@ -334,8 +387,8 @@ def _triage_event(
     stations_200km = int((availability or {}).get("stations_200km") or 0)
     stations_300km = int((availability or {}).get("stations_300km") or 0)
     existing_data_status = str((availability or {}).get("existing_data_status") or "")
-    priority = _priority(stations_200km, workflow_status, existing_data_status)
-    action = _suggested_action(priority, workflow_status, availability, db_available.get(source, False))
+    priority = _priority(source, stations_200km, workflow_status, existing_data_status)
+    action = _suggested_action(priority, workflow_status, availability, db_available.get(source, False), source)
     triaged = {
         **event,
         "source": source,
