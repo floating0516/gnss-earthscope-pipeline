@@ -88,6 +88,52 @@ class EventBatchSummaryTest(unittest.TestCase):
             self.assertEqual(rows[0]["normalized_event_dir"], "@ROOT@/exports/normalized-ok-stations-us-nz/us-event-a")
             self.assertEqual(rows[0]["export_package_status"], "COMPLETE")
 
+    def test_summary_accepts_cddis_normalize_status_alias(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            batch_csv = root / "data" / "batches" / "batch.csv"
+            summary_tsv = root / "data" / "batches" / "batch-summary.tsv"
+            workflow_reports = root / "runs" / "event-a" / "workflow-20200101T000000Z" / "reports"
+            batch_csv.parent.mkdir(parents=True)
+            workflow_reports.mkdir(parents=True)
+
+            batch_csv.write_text("event_id,event_time,stations,status\nevent-a,2020-01-01T00:00:00Z,ABCD,OK\n", encoding="utf-8")
+            (workflow_reports / "workflow-summary.json").write_text(
+                json.dumps(
+                    {
+                        "status": {
+                            "download": "OK",
+                            "process": "OK",
+                            "quality": "OK",
+                            "normalize": "OK",
+                            "plot": "OK",
+                        },
+                        "counts": {},
+                        "paths": {},
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            rc = build_event_batch_summary.main(
+                [
+                    "--csv",
+                    str(batch_csv),
+                    "--summary",
+                    str(summary_tsv),
+                    "--run-root",
+                    str(root / "runs"),
+                    "--pipeline-root",
+                    str(root),
+                ]
+            )
+
+            self.assertEqual(rc, 0)
+            with summary_tsv.open(newline="", encoding="utf-8") as handle:
+                rows = list(csv.DictReader(handle, delimiter="\t"))
+            self.assertEqual(rows[0]["normalized_status"], "OK")
+
     def test_summary_leaves_export_status_blank_without_workflow_output(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

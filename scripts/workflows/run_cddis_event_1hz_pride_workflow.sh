@@ -257,6 +257,7 @@ write_workflow_summary() {
     printf 'process_status\t%s\n' "$process_status"
     printf 'quality_status\t%s\n' "$quality_status"
     printf 'normalize_status\t%s\n' "$normalize_status"
+    printf 'normalized_status\t%s\n' "$normalize_status"
     printf 'plot_status\t%s\n' "$plot_status"
     printf 'obs_file_count\t%s\n' "$obs_count"
     printf 'kin_file_count\t%s\n' "$kin_count"
@@ -295,6 +296,7 @@ payload = {
         "process": os.environ["process_status"],
         "quality": os.environ["quality_status"],
         "normalize": os.environ["normalize_status"],
+        "normalized": os.environ["normalize_status"],
         "plot": os.environ["plot_status"],
     },
     "counts": {

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import csv
+import json
 import subprocess
 import tempfile
 import unittest
@@ -135,9 +137,16 @@ class CddisWorkflowTest(unittest.TestCase):
             workflow_dirs = sorted(event_dir.glob("workflow-*"))
             kin_manifest = workflow_dirs[-1] / "manifests" / "kin-files.txt"
             kin_manifest_text = kin_manifest.read_text(encoding="utf-8").strip()
+            summary_json = json.loads((workflow_dirs[-1] / "reports" / "workflow-summary.json").read_text(encoding="utf-8"))
+            with (workflow_dirs[-1] / "reports" / "workflow-summary.tsv").open(newline="", encoding="utf-8") as handle:
+                summary_tsv = {row[0]: row[1] for row in csv.reader(handle, delimiter="\t") if len(row) >= 2}
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(kin_manifest_text, str(kin_file))
+        self.assertEqual(summary_json["status"]["normalize"], "SKIPPED")
+        self.assertEqual(summary_json["status"]["normalized"], "SKIPPED")
+        self.assertEqual(summary_tsv["normalize_status"], "SKIPPED")
+        self.assertEqual(summary_tsv["normalized_status"], "SKIPPED")
 
 
 if __name__ == "__main__":

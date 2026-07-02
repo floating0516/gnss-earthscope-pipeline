@@ -260,6 +260,7 @@ fields = [
     "process_status",
     "quality_status",
     "normalize_status",
+    "normalized_status",
     "plot_status",
     "obs_files",
     "kin_files",
@@ -285,6 +286,7 @@ with csv_path.open(newline="") as handle:
                     summary = {}
 
         status = summary.get("status", {})
+        normalized_status = status.get("normalized", status.get("normalize", ""))
         counts = summary.get("counts", {})
         paths = summary.get("paths", {})
         rows_out.append({
@@ -298,6 +300,7 @@ with csv_path.open(newline="") as handle:
             "process_status": status.get("process", ""),
             "quality_status": status.get("quality", ""),
             "normalize_status": status.get("normalize", ""),
+            "normalized_status": normalized_status,
             "plot_status": status.get("plot", ""),
             "obs_files": counts.get("obs_files", ""),
             "kin_files": counts.get("kin_files", ""),

@@ -104,6 +104,8 @@ def build_row(batch_row: dict[str, str], run_root: Path, pipeline_root: Path) ->
     quality = summary.get("quality", {}).get("summary", {})
     normalized_event_dir = paths.get("normalized_event_dir", "")
 
+    normalized_status = status.get("normalized", status.get("normalize", ""))
+
     return {
         "event_id": event_id,
         "event_time": (batch_row.get("event_time") or "").strip(),
@@ -119,7 +121,7 @@ def build_row(batch_row: dict[str, str], run_root: Path, pipeline_root: Path) ->
         "cleanup_status": status.get("cleanup", ""),
         "pride_cleanup_status": status.get("pride_cleanup", ""),
         "obs_cleanup_status": status.get("obs_cleanup", ""),
-        "normalized_status": status.get("normalized", ""),
+        "normalized_status": normalized_status,
         "normalized_station_count": counts.get("normalized_stations", ""),
         "normalized_waveform_rows": counts.get("normalized_waveform_rows", ""),
         "normalized_event_grade": paths.get("normalized_event_grade", ""),
