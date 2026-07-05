@@ -1,0 +1,219 @@
+# EarthScope And GeoNet Runbook
+
+This runbook describes the production operating path. It keeps event discovery, source routing, workflow execution, export validation, and reporting separate.
+
+## 1. Environment Check
+
+Run the local dependency check first:
+
+```bash
+gnss-eq check-env
+```
+
+EarthScope processing generally needs local tools such as `curl`, `jq`, `timeout`, `CRX2RNX`, `pdp3`, and an EarthScope login token. GeoNet does not require an EarthScope token, but it still depends on PRIDE-related processing tools for the PPP stage.
+
+## 2. EarthScope Availability Update
+
+Use the current pipeline wrapper for EarthScope. It pins the intended paths for the availability DB, metadata cache, batch CSVs, observation cache, and run root.
+
+```bash
+scripts/workflows/current_pipeline.sh paths
+scripts/workflows/current_pipeline.sh update-availability
+```
+
+The default DB is:
+
+```text
+data/earthscope_availability/earthscope_1hz.sqlite
+```
+
+## 3. EarthScope Candidate Rebuild
+
+Rebuild event-station candidates from EarthScope same-day 1 Hz availability and EarthScope metadata coordinates:
+
+```bash
+scripts/workflows/current_pipeline.sh rebuild-candidates
+```
+
+For a single event:
+
+```bash
+scripts/workflows/current_pipeline.sh rebuild-candidates --event-id EVENT_ID
+```
+
+Use dry-run when checking planned effects:
+
+```bash
+scripts/workflows/current_pipeline.sh rebuild-candidates --event-id EVENT_ID --dry-run
+```
+
+## 4. EarthScope Event Review
+
+List available events and candidate station counts:
+
+```bash
+scripts/workflows/current_pipeline.sh list-events
+```
+
+Do not use historical normalized inventory files as station-selection authority for new EarthScope processing.
+
+## 5. EarthScope Batch Export
+
+Export a processable event to a CSV batch:
+
+```bash
+scripts/workflows/current_pipeline.sh export-batch --event-id EVENT_ID --radius-km 200
+```
+
+The default output is:
+
+```text
+data/batches/EVENT_ID-200km.csv
+```
+
+Use `--include-existing` only when intentionally rerunning an event that already has normalized data.
+
+## 6. EarthScope Batch Run
+
+Run a resumable batch:
+
+```bash
+scripts/workflows/current_pipeline.sh run-batch --csv data/batches/EVENT_ID-200km.csv --timeout 3600
+```
+
+The wrapper runs EarthScope preflight before starting the batch. If preflight fails, stop and fix the environment or DB state before processing.
+
+To preserve intermediates for debugging:
+
+```bash
+scripts/workflows/current_pipeline.sh run-batch \
+  --csv data/batches/EVENT_ID-200km.csv \
+  --no-cleanup-downloads \
+  --no-cleanup-pride-workdir \
+  --no-cleanup-obs
+```
+
+## 7. GeoNet Database, Availability, Batch, And Event Workflow
+
+GeoNet is the second production source and should remain source-specific at the downloader and candidate layer.
+
+Discovery and availability entry points:
+
+```bash
+python scripts/database/build_geonet_nz_database.py --help
+python scripts/availability/update_geonet_event_highrate_availability.py --help
+```
+
+Batch and event workflow entry points:
+
+```bash
+scripts/workflows/run_geonet_batch_workflow.sh --help
+scripts/workflows/run_geonet_event_1hz_pride_workflow.sh --help
+```
+
+The GeoNet event workflow writes the same workflow-layer structure under `runs/<event-id>/workflow-*/` and should end in the same normalized event package contract as EarthScope.
+
+## 8. Rerunning FAIL Or TIMEOUT
+
+Batch CSV rows with these statuses are runnable:
+
+```text
+blank
+FAIL
+TIMEOUT
+RETRY_*
+UNKNOWN_REVIEW
+```
+
+Rows with these statuses are terminal by default:
+
+```text
+OK
+SKIPPED_EXISTING
+CLASSIFIED_*
+ABANDONED_*
+```
+
+Use `--rerun-ok` only when intentionally rerunning previously successful rows.
+
+Before rerunning, inspect the latest workflow summary:
+
+```text
+runs/<event-id>/workflow-*/reports/workflow-summary.json
+runs/<event-id>/workflow-*/reports/workflow-summary.tsv
+```
+
+Prefer classifying repeated failures into `CLASSIFIED_*` or `ABANDONED_*` instead of rerunning indefinitely.
+
+## 9. Classifying Unprocessable Events
+
+Use terminal classifications for events that should not be retried:
+
+```text
+CLASSIFIED_NO_OBS
+CLASSIFIED_NO_KIN
+CLASSIFIED_QUALITY_FAIL
+CLASSIFIED_NO_STATIONS
+CLASSIFIED_SOURCE_UNSUPPORTED
+ABANDONED_AUTH
+ABANDONED_REPEATED_TIMEOUT
+```
+
+Classifications should be based on workflow summaries, validator output, and known source boundaries, not on directory counts alone.
+
+## 10. Validate Normalized Export
+
+After workflow runs, validate the final dataset:
+
+```bash
+python scripts/summaries/validate_normalized_export.py \
+  --root exports/normalized-ok-stations-us-nz
+```
+
+Use strict mode before calling the dataset complete:
+
+```bash
+python scripts/summaries/validate_normalized_export.py \
+  --root exports/normalized-ok-stations-us-nz \
+  --strict
+```
+
+If validation fails, fix the package, manifest, or workflow issue before treating the event as complete.
+
+## 11. Generate Summaries, Reports, And Figures
+
+Normalized event figures are generated by the workflow after successful normalization. The standard figure root is:
+
+```text
+figure/
+```
+
+The standard future inventory/report flow should be:
+
+```bash
+python scripts/summaries/build_current_normalized_inventory.py \
+  --root exports/normalized-ok-stations-us-nz \
+  --figure-root figure \
+  --out-prefix data/summaries/current-normalized-export
+```
+
+Dataset reports should read normalized packages and figure indexes, not workflow logs directly.
+
+## 12. Watcher Operating Boundary
+
+`gnss-eq watch-usgs` is for event monitoring, alerting, and state recording. It should not automatically download GNSS data, run PRIDE, or mutate production exports by default.
+
+Use:
+
+```bash
+gnss-eq watch-usgs --interval 300 --min-magnitude 6 --scope americas,nz
+```
+
+Then review and route events explicitly:
+
+```bash
+gnss-eq review-usgs
+gnss-eq monitor
+```
+
+Automatic processing must be an explicit operator decision with recorded parameters and provenance.
