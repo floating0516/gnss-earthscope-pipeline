@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="460" viewBox="0 0 760 460">
+<rect width="100%" height="100%" fill="white"/>
+<text x="20" y="28" font-size="18" font-family="sans-serif">Event count vs formula MAE</text>
+<rect x="70" y="45" width="610" height="310" fill="none" stroke="#777"/>
+<line x1="70.0" y1="45" x2="70.0" y2="355" stroke="#eee"/>
+<text x="70.0" y="373" text-anchor="middle" font-size="10" font-family="sans-serif">0</text>
+<line x1="375.0" y1="45" x2="375.0" y2="355" stroke="#eee"/>
+<text x="375.0" y="373" text-anchor="middle" font-size="10" font-family="sans-serif">71</text>
+<line x1="680.0" y1="45" x2="680.0" y2="355" stroke="#eee"/>
+<text x="680.0" y="373" text-anchor="middle" font-size="10" font-family="sans-serif">142</text>
+<line x1="70" y1="355.0" x2="680" y2="355.0" stroke="#eee"/>
+<text x="62" y="358.0" text-anchor="end" font-size="10" font-family="sans-serif">0.00</text>
+<line x1="70" y1="200.0" x2="680" y2="200.0" stroke="#eee"/>
+<text x="62" y="203.0" text-anchor="end" font-size="10" font-family="sans-serif">0.50</text>
+<line x1="70" y1="45.0" x2="680" y2="45.0" stroke="#eee"/>
+<text x="62" y="48.0" text-anchor="end" font-size="10" font-family="sans-serif">1.00</text>
+<circle cx="680.0" cy="167.2" r="3.5" fill="#4c78a8" fill-opacity="0.75"><title>all melgar_2015 events=142 MAE=0.605782</title></circle>
+<circle cx="680.0" cy="100.7" r="3.5" fill="#f58518" fill-opacity="0.75"><title>all crowell_2016_gfast events=142 MAE=0.820208</title></circle>
+<circle cx="680.0" cy="201.3" r="5" fill="#54a24b" fill-opacity="0.75"><title>all ruhl_2019 events=142 MAE=0.495747</title></circle>
+<circle cx="680.0" cy="167.2" r="3.5" fill="#4c78a8" fill-opacity="0.75"><title>pgd_ge_1cm melgar_2015 events=142 MAE=0.605782</title></circle>
+<circle cx="680.0" cy="100.7" r="3.5" fill="#f58518" fill-opacity="0.75"><title>pgd_ge_1cm crowell_2016_gfast events=142 MAE=0.820208</title></circle>
+<circle cx="680.0" cy="201.3" r="5" fill="#54a24b" fill-opacity="0.75"><title>pgd_ge_1cm ruhl_2019 events=142 MAE=0.495747</title></circle>
+<circle cx="675.7" cy="166.6" r="3.5" fill="#4c78a8" fill-opacity="0.75"><title>pgd_ge_2cm melgar_2015 events=141 MAE=0.607661</title></circle>
+<circle cx="675.7" cy="99.1" r="3.5" fill="#f58518" fill-opacity="0.75"><title>pgd_ge_2cm crowell_2016_gfast events=141 MAE=0.825478</title></circle>
+<circle cx="675.7" cy="201.6" r="5" fill="#54a24b" fill-opacity="0.75"><title>pgd_ge_2cm ruhl_2019 events=141 MAE=0.494894</title></circle>
+<circle cx="529.6" cy="123.1" r="3.5" fill="#4c78a8" fill-opacity="0.75"><title>pgd_ge_5cm melgar_2015 events=107 MAE=0.748190</title></circle>
+<circle cx="529.6" cy="64.9" r="3.5" fill="#f58518" fill-opacity="0.75"><title>pgd_ge_5cm crowell_2016_gfast events=107 MAE=0.935755</title></circle>
+<circle cx="529.6" cy="159.5" r="5" fill="#54a24b" fill-opacity="0.75"><title>pgd_ge_5cm ruhl_2019 events=107 MAE=0.630521</title></circle>
+<circle cx="413.7" cy="174.0" r="3.5" fill="#4c78a8" fill-opacity="0.75"><title>snr_ge_3 melgar_2015 events=80 MAE=0.584025</title></circle>
+<circle cx="413.7" cy="115.5" r="3.5" fill="#f58518" fill-opacity="0.75"><title>snr_ge_3 crowell_2016_gfast events=80 MAE=0.772674</title></circle>
+<circle cx="413.7" cy="201.9" r="5" fill="#54a24b" fill-opacity="0.75"><title>snr_ge_3 ruhl_2019 events=80 MAE=0.493874</title></circle>
+<circle cx="155.9" cy="184.7" r="5" fill="#4c78a8" fill-opacity="0.75"><title>snr_ge_5 melgar_2015 events=20 MAE=0.549269</title></circle>
+<circle cx="155.9" cy="171.4" r="3.5" fill="#f58518" fill-opacity="0.75"><title>snr_ge_5 crowell_2016_gfast events=20 MAE=0.592302</title></circle>
+<circle cx="155.9" cy="174.6" r="3.5" fill="#54a24b" fill-opacity="0.75"><title>snr_ge_5 ruhl_2019 events=20 MAE=0.581910</title></circle>
+<circle cx="662.8" cy="174.6" r="3.5" fill="#4c78a8" fill-opacity="0.75"><title>dist_le_300km melgar_2015 events=138 MAE=0.582040</title></circle>
+<circle cx="662.8" cy="110.6" r="3.5" fill="#f58518" fill-opacity="0.75"><title>dist_le_300km crowell_2016_gfast events=138 MAE=0.788329</title></circle>
+<circle cx="662.8" cy="207.3" r="5" fill="#54a24b" fill-opacity="0.75"><title>dist_le_300km ruhl_2019 events=138 MAE=0.476392</title></circle>
+<circle cx="516.8" cy="196.2" r="3.5" fill="#4c78a8" fill-opacity="0.75"><title>dist_le_200km melgar_2015 events=104 MAE=0.512270</title></circle>
+<circle cx="516.8" cy="142.7" r="3.5" fill="#f58518" fill-opacity="0.75"><title>dist_le_200km crowell_2016_gfast events=104 MAE=0.684813</title></circle>
+<circle cx="516.8" cy="225.5" r="5" fill="#54a24b" fill-opacity="0.75"><title>dist_le_200km ruhl_2019 events=104 MAE=0.417837</title></circle>
+<circle cx="130.1" cy="236.3" r="5" fill="#4c78a8" fill-opacity="0.75"><title>quality_snr3_time300_dist300_min3sta melgar_2015 events=14 MAE=0.382822</title></circle>
+<circle cx="130.1" cy="190.4" r="3.5" fill="#f58518" fill-opacity="0.75"><title>quality_snr3_time300_dist300_min3sta crowell_2016_gfast events=14 MAE=0.530910</title></circle>
+<circle cx="130.1" cy="235.4" r="3.5" fill="#54a24b" fill-opacity="0.75"><title>quality_snr3_time300_dist300_min3sta ruhl_2019 events=14 MAE=0.385823</title></circle>
+<circle cx="95.8" cy="324.4" r="5" fill="#4c78a8" fill-opacity="0.75"><title>strict_snr5_time300_dist300_min3sta melgar_2015 events=6 MAE=0.098695</title></circle>
+<circle cx="95.8" cy="319.3" r="3.5" fill="#f58518" fill-opacity="0.75"><title>strict_snr5_time300_dist300_min3sta crowell_2016_gfast events=6 MAE=0.115133</title></circle>
+<circle cx="95.8" cy="276.0" r="3.5" fill="#54a24b" fill-opacity="0.75"><title>strict_snr5_time300_dist300_min3sta ruhl_2019 events=6 MAE=0.254857</title></circle>
+<text x="375.0" y="440" text-anchor="middle" font-size="12" font-family="sans-serif">event count</text>
+<text x="20" y="200.0" transform="rotate(-90 20 200.0)" text-anchor="middle" font-size="12" font-family="sans-serif">MAE Mw</text>
+</svg>

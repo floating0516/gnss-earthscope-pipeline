@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="520" viewBox="0 0 1280 520">
+<rect width="100%" height="100%" fill="white"/>
+<text x="20" y="28" font-size="18" font-family="sans-serif">PGD filter scenarios: formula MAE</text>
+<rect x="70" y="45" width="1170" height="300" fill="none" stroke="#777"/>
+<line x1="70" y1="345.0" x2="1240" y2="345.0" stroke="#ddd"/>
+<text x="62" y="348.0" text-anchor="end" font-size="10" font-family="sans-serif">0.00</text>
+<line x1="70" y1="195.0" x2="1240" y2="195.0" stroke="#ddd"/>
+<text x="62" y="198.0" text-anchor="end" font-size="10" font-family="sans-serif">0.53</text>
+<line x1="70" y1="45.0" x2="1240" y2="45.0" stroke="#ddd"/>
+<text x="62" y="48.0" text-anchor="end" font-size="10" font-family="sans-serif">1.06</text>
+<rect x="75.8" y="173.9" width="27.3" height="171.1" fill="#4c78a8"><title>all melgar_2015 MAE=0.606 RMSE=0.724</title></rect>
+<rect x="114.8" y="113.3" width="27.3" height="231.7" fill="#f58518"><title>all crowell_2016_gfast MAE=0.820 RMSE=0.939</title></rect>
+<rect x="153.8" y="204.9" width="27.3" height="140.1" fill="#54a24b"><title>all ruhl_2019 MAE=0.496 RMSE=0.601</title></rect>
+<text x="167.5" y="363" text-anchor="middle" font-size="9" font-family="sans-serif" transform="rotate(55 167.5 363)">all</text>
+<rect x="192.8" y="173.9" width="27.3" height="171.1" fill="#4c78a8"><title>pgd_ge_1cm melgar_2015 MAE=0.606 RMSE=0.724</title></rect>
+<rect x="231.8" y="113.3" width="27.3" height="231.7" fill="#f58518"><title>pgd_ge_1cm crowell_2016_gfast MAE=0.820 RMSE=0.939</title></rect>
+<rect x="270.9" y="204.9" width="27.3" height="140.1" fill="#54a24b"><title>pgd_ge_1cm ruhl_2019 MAE=0.496 RMSE=0.601</title></rect>
+<text x="284.5" y="363" text-anchor="middle" font-size="9" font-family="sans-serif" transform="rotate(55 284.5 363)">pgd_ge_1cm</text>
+<rect x="309.9" y="173.3" width="27.3" height="171.7" fill="#4c78a8"><title>pgd_ge_2cm melgar_2015 MAE=0.608 RMSE=0.726</title></rect>
+<rect x="348.9" y="111.8" width="27.3" height="233.2" fill="#f58518"><title>pgd_ge_2cm crowell_2016_gfast MAE=0.825 RMSE=0.943</title></rect>
+<rect x="387.9" y="205.2" width="27.3" height="139.8" fill="#54a24b"><title>pgd_ge_2cm ruhl_2019 MAE=0.495 RMSE=0.601</title></rect>
+<text x="401.5" y="363" text-anchor="middle" font-size="9" font-family="sans-serif" transform="rotate(55 401.5 363)">pgd_ge_2cm</text>
+<rect x="426.9" y="133.6" width="27.3" height="211.4" fill="#4c78a8"><title>pgd_ge_5cm melgar_2015 MAE=0.748 RMSE=0.873</title></rect>
+<rect x="465.9" y="80.6" width="27.3" height="264.4" fill="#f58518"><title>pgd_ge_5cm crowell_2016_gfast MAE=0.936 RMSE=1.062</title></rect>
+<rect x="504.9" y="166.9" width="27.3" height="178.1" fill="#54a24b"><title>pgd_ge_5cm ruhl_2019 MAE=0.631 RMSE=0.740</title></rect>
+<text x="518.5" y="363" text-anchor="middle" font-size="9" font-family="sans-serif" transform="rotate(55 518.5 363)">pgd_ge_5cm</text>
+<rect x="543.9" y="180.0" width="27.3" height="165.0" fill="#4c78a8"><title>snr_ge_3 melgar_2015 MAE=0.584 RMSE=0.697</title></rect>
+<rect x="582.9" y="126.7" width="27.3" height="218.3" fill="#f58518"><title>snr_ge_3 crowell_2016_gfast MAE=0.773 RMSE=0.902</title></rect>
+<rect x="621.9" y="205.5" width="27.3" height="139.5" fill="#54a24b"><title>snr_ge_3 ruhl_2019 MAE=0.494 RMSE=0.586</title></rect>
+<text x="635.5" y="363" text-anchor="middle" font-size="9" font-family="sans-serif" transform="rotate(55 635.5 363)">snr_ge_3</text>
+<rect x="660.9" y="189.8" width="27.3" height="155.2" fill="#4c78a8"><title>snr_ge_5 melgar_2015 MAE=0.549 RMSE=0.793</title></rect>
+<rect x="699.9" y="177.7" width="27.3" height="167.3" fill="#f58518"><title>snr_ge_5 crowell_2016_gfast MAE=0.592 RMSE=0.866</title></rect>
+<rect x="738.9" y="180.6" width="27.3" height="164.4" fill="#54a24b"><title>snr_ge_5 ruhl_2019 MAE=0.582 RMSE=0.747</title></rect>
+<text x="752.5" y="363" text-anchor="middle" font-size="9" font-family="sans-serif" transform="rotate(55 752.5 363)">snr_ge_5</text>
+<rect x="777.9" y="180.6" width="27.3" height="164.4" fill="#4c78a8"><title>dist_le_300km melgar_2015 MAE=0.582 RMSE=0.704</title></rect>
+<rect x="816.9" y="122.3" width="27.3" height="222.7" fill="#f58518"><title>dist_le_300km crowell_2016_gfast MAE=0.788 RMSE=0.911</title></rect>
+<rect x="855.9" y="210.4" width="27.3" height="134.6" fill="#54a24b"><title>dist_le_300km ruhl_2019 MAE=0.476 RMSE=0.583</title></rect>
+<text x="869.5" y="363" text-anchor="middle" font-size="9" font-family="sans-serif" transform="rotate(55 869.5 363)">dist_le_300km</text>
+<rect x="894.9" y="200.3" width="27.3" height="144.7" fill="#4c78a8"><title>dist_le_200km melgar_2015 MAE=0.512 RMSE=0.624</title></rect>
+<rect x="933.9" y="151.5" width="27.3" height="193.5" fill="#f58518"><title>dist_le_200km crowell_2016_gfast MAE=0.685 RMSE=0.796</title></rect>
+<rect x="972.9" y="227.0" width="27.3" height="118.0" fill="#54a24b"><title>dist_le_200km ruhl_2019 MAE=0.418 RMSE=0.513</title></rect>
+<text x="986.5" y="363" text-anchor="middle" font-size="9" font-family="sans-serif" transform="rotate(55 986.5 363)">dist_le_200km</text>
+<rect x="1011.9" y="236.8" width="27.3" height="108.2" fill="#4c78a8"><title>quality_snr3_time300_dist300_min3sta melgar_2015 MAE=0.383 RMSE=0.510</title></rect>
+<rect x="1050.8" y="195.0" width="27.3" height="150.0" fill="#f58518"><title>quality_snr3_time300_dist300_min3sta crowell_2016_gfast MAE=0.531 RMSE=0.690</title></rect>
+<rect x="1089.8" y="236.0" width="27.3" height="109.0" fill="#54a24b"><title>quality_snr3_time300_dist300_min3sta ruhl_2019 MAE=0.386 RMSE=0.450</title></rect>
+<text x="1103.5" y="363" text-anchor="middle" font-size="9" font-family="sans-serif" transform="rotate(55 1103.5 363)">quality_snr3_time300_dist300_min3sta</text>
+<rect x="1128.8" y="317.1" width="27.3" height="27.9" fill="#4c78a8"><title>strict_snr5_time300_dist300_min3sta melgar_2015 MAE=0.099 RMSE=0.118</title></rect>
+<rect x="1167.8" y="312.5" width="27.3" height="32.5" fill="#f58518"><title>strict_snr5_time300_dist300_min3sta crowell_2016_gfast MAE=0.115 RMSE=0.128</title></rect>
+<rect x="1206.8" y="273.0" width="27.3" height="72.0" fill="#54a24b"><title>strict_snr5_time300_dist300_min3sta ruhl_2019 MAE=0.255 RMSE=0.275</title></rect>
+<text x="1220.5" y="363" text-anchor="middle" font-size="9" font-family="sans-serif" transform="rotate(55 1220.5 363)">strict_snr5_time300_dist300_min3sta</text>
+<rect x="960" y="390" width="10" height="10" fill="#4c78a8"/>
+<text x="976" y="400" font-size="12" font-family="sans-serif">melgar_2015</text>
+<rect x="960" y="408" width="10" height="10" fill="#f58518"/>
+<text x="976" y="418" font-size="12" font-family="sans-serif">crowell_2016_gfast</text>
+<rect x="960" y="426" width="10" height="10" fill="#54a24b"/>
+<text x="976" y="436" font-size="12" font-family="sans-serif">ruhl_2019</text>
+</svg>

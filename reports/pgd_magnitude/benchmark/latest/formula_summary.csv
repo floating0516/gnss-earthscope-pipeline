@@ -1,0 +1,4 @@
+comparison_group,comparison_value,formula,station_aggregation,event_count,high_medium_reliability_events,low_reliability_events,residual_outlier_count,bias_mw,mae_mw,rmse_mw,median_abs_error_mw
+all,ALL,melgar_2015,median,142,14,38,26,0.541687,0.605782,0.723839,0.572469
+all,ALL,crowell_2016_gfast,median,142,14,38,57,0.806089,0.820208,0.939427,0.871548
+all,ALL,ruhl_2019,median,142,14,38,13,0.338397,0.495747,0.601400,0.432273

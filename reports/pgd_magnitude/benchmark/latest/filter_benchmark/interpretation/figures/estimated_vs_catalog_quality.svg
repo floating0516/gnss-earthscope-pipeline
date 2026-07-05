@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="520" viewBox="0 0 600 520">
+<rect width="100%" height="100%" fill="white"/>
+<text x="20" y="28" font-size="18" font-family="sans-serif">QUALITY: estimated vs catalog Mw</text>
+<rect x="70" y="50" width="420" height="360" fill="none" stroke="#777"/>
+<line x1="70" y1="410" x2="490" y2="50" stroke="#444" stroke-dasharray="4 4"/>
+<line x1="108.2" y1="50" x2="108.2" y2="410" stroke="#eee"/>
+<line x1="70" y1="377.3" x2="490" y2="377.3" stroke="#eee"/>
+<text x="108.2" y="426" text-anchor="middle" font-size="10" font-family="sans-serif">6</text>
+<text x="62" y="380.3" text-anchor="end" font-size="10" font-family="sans-serif">6</text>
+<line x1="299.1" y1="50" x2="299.1" y2="410" stroke="#eee"/>
+<line x1="70" y1="213.6" x2="490" y2="213.6" stroke="#eee"/>
+<text x="299.1" y="426" text-anchor="middle" font-size="10" font-family="sans-serif">7</text>
+<text x="62" y="216.6" text-anchor="end" font-size="10" font-family="sans-serif">7</text>
+<line x1="490.0" y1="50" x2="490.0" y2="410" stroke="#eee"/>
+<line x1="70" y1="50.0" x2="490" y2="50.0" stroke="#eee"/>
+<text x="490.0" y="426" text-anchor="middle" font-size="10" font-family="sans-serif">8</text>
+<text x="62" y="53.0" text-anchor="end" font-size="10" font-family="sans-serif">8</text>
+<circle cx="203.6" cy="287.9" r="4" fill="#f58518" fill-opacity="0.7"><title>2013p543824 crowell_2016_gfast residual=0.046212</title></circle>
+<circle cx="203.6" cy="307.9" r="4" fill="#4c78a8" fill-opacity="0.7"><title>2013p543824 melgar_2015 residual=-0.076079</title></circle>
+<circle cx="203.6" cy="349.7" r="4" fill="#54a24b" fill-opacity="0.7"><title>2013p543824 ruhl_2019 residual=-0.331421</title></circle>
+<circle cx="203.6" cy="231.7" r="4" fill="#f58518" fill-opacity="0.7"><title>2013p613797 crowell_2016_gfast residual=0.389435</title></circle>
+<circle cx="203.6" cy="267.3" r="4" fill="#4c78a8" fill-opacity="0.7"><title>2013p613797 melgar_2015 residual=0.171791</title></circle>
+<circle cx="203.6" cy="305.5" r="4" fill="#54a24b" fill-opacity="0.7"><title>2013p613797 ruhl_2019 residual=-0.061248</title></circle>
+<circle cx="318.2" cy="174.2" r="4" fill="#f58518" fill-opacity="0.7"><title>2016p661332 crowell_2016_gfast residual=0.141025</title></circle>
+<circle cx="318.2" cy="214.5" r="4" fill="#4c78a8" fill-opacity="0.7"><title>2016p661332 melgar_2015 residual=-0.105157</title></circle>
+<circle cx="318.2" cy="248.0" r="4" fill="#54a24b" fill-opacity="0.7"><title>2016p661332 ruhl_2019 residual=-0.310043</title></circle>
+<circle cx="451.8" cy="116.6" r="4" fill="#f58518" fill-opacity="0.7"><title>2016p858000 crowell_2016_gfast residual=-0.207067</title></circle>
+<circle cx="451.8" cy="121.9" r="4" fill="#4c78a8" fill-opacity="0.7"><title>2016p858000 melgar_2015 residual=-0.239125</title></circle>
+<circle cx="451.8" cy="150.4" r="4" fill="#54a24b" fill-opacity="0.7"><title>2016p858000 ruhl_2019 residual=-0.413532</title></circle>
+<circle cx="146.4" cy="186.0" r="4" fill="#f58518" fill-opacity="0.7"><title>2016p858055 crowell_2016_gfast residual=0.968982</title></circle>
+<circle cx="146.4" cy="239.0" r="4" fill="#4c78a8" fill-opacity="0.7"><title>2016p858055 melgar_2015 residual=0.644783</title></circle>
+<circle cx="146.4" cy="274.2" r="4" fill="#54a24b" fill-opacity="0.7"><title>2016p858055 ruhl_2019 residual=0.429795</title></circle>
+<circle cx="127.3" cy="219.1" r="4" fill="#f58518" fill-opacity="0.7"><title>2016p858094 crowell_2016_gfast residual=0.866325</title></circle>
+<circle cx="127.3" cy="266.3" r="4" fill="#4c78a8" fill-opacity="0.7"><title>2016p858094 melgar_2015 residual=0.578314</title></circle>
+<circle cx="127.3" cy="304.1" r="4" fill="#54a24b" fill-opacity="0.7"><title>2016p858094 ruhl_2019 residual=0.347163</title></circle>
+<circle cx="241.8" cy="168.0" r="4" fill="#f58518" fill-opacity="0.7"><title>2016p859524 crowell_2016_gfast residual=0.578809</title></circle>
+<circle cx="241.8" cy="213.1" r="4" fill="#4c78a8" fill-opacity="0.7"><title>2016p859524 melgar_2015 residual=0.303357</title></circle>
+<circle cx="241.8" cy="246.3" r="4" fill="#54a24b" fill-opacity="0.7"><title>2016p859524 ruhl_2019 residual=0.100543</title></circle>
+<circle cx="337.3" cy="153.3" r="4" fill="#f58518" fill-opacity="0.7"><title>2021p169083 crowell_2016_gfast residual=0.168823</title></circle>
+<circle cx="337.3" cy="200.3" r="4" fill="#4c78a8" fill-opacity="0.7"><title>2021p169083 melgar_2015 residual=-0.118386</title></circle>
+<circle cx="337.3" cy="232.2" r="4" fill="#54a24b" fill-opacity="0.7"><title>2021p169083 ruhl_2019 residual=-0.313281</title></circle>
+<circle cx="146.4" cy="191.2" r="4" fill="#f58518" fill-opacity="0.7"><title>ak014cbigci8 crowell_2016_gfast residual=0.937236</title></circle>
+<circle cx="146.4" cy="225.8" r="4" fill="#4c78a8" fill-opacity="0.7"><title>ak014cbigci8 melgar_2015 residual=0.725740</title></circle>
+<circle cx="146.4" cy="260.6" r="4" fill="#54a24b" fill-opacity="0.7"><title>ak014cbigci8 ruhl_2019 residual=0.512917</title></circle>
+<circle cx="184.5" cy="289.9" r="4" fill="#f58518" fill-opacity="0.7"><title>nc73821036 crowell_2016_gfast residual=0.134010</title></circle>
+<circle cx="184.5" cy="321.0" r="4" fill="#4c78a8" fill-opacity="0.7"><title>nc73821036 melgar_2015 residual=-0.055812</title></circle>
+<circle cx="184.5" cy="363.5" r="4" fill="#54a24b" fill-opacity="0.7"><title>nc73821036 ruhl_2019 residual=-0.316104</title></circle>
+<circle cx="203.6" cy="81.5" r="4" fill="#f58518" fill-opacity="0.7"><title>us2000bmhe crowell_2016_gfast residual=1.307469</title></circle>
+<circle cx="203.6" cy="121.9" r="4" fill="#4c78a8" fill-opacity="0.7"><title>us2000bmhe melgar_2015 residual=1.060555</title></circle>
+<circle cx="203.6" cy="146.4" r="4" fill="#54a24b" fill-opacity="0.7"><title>us2000bmhe ruhl_2019 residual=0.910982</title></circle>
+<circle cx="375.5" cy="176.8" r="4" fill="#f58518" fill-opacity="0.7"><title>us6000ah9t crowell_2016_gfast residual=-0.175152</title></circle>
+<circle cx="375.5" cy="191.2" r="4" fill="#4c78a8" fill-opacity="0.7"><title>us6000ah9t melgar_2015 residual=-0.263183</title></circle>
+<circle cx="375.5" cy="223.4" r="4" fill="#54a24b" fill-opacity="0.7"><title>us6000ah9t ruhl_2019 residual=-0.459862</title></circle>
+<circle cx="413.6" cy="83.1" r="4" fill="#f58518" fill-opacity="0.7"><title>us7000i9bw crowell_2016_gfast residual=0.197449</title></circle>
+<circle cx="413.6" cy="108.5" r="4" fill="#4c78a8" fill-opacity="0.7"><title>us7000i9bw melgar_2015 residual=0.042648</title></circle>
+<circle cx="413.6" cy="132.3" r="4" fill="#54a24b" fill-opacity="0.7"><title>us7000i9bw ruhl_2019 residual=-0.102979</title></circle>
+<circle cx="146.4" cy="129.4" r="4" fill="#f58518" fill-opacity="0.7"><title>us7000irjd crowell_2016_gfast residual=1.314750</title></circle>
+<circle cx="146.4" cy="185.1" r="4" fill="#4c78a8" fill-opacity="0.7"><title>us7000irjd melgar_2015 residual=0.974581</title></circle>
+<circle cx="146.4" cy="215.0" r="4" fill="#54a24b" fill-opacity="0.7"><title>us7000irjd ruhl_2019 residual=0.791656</title></circle>
+<circle cx="390" cy="436" r="4" fill="#4c78a8"/>
+<text x="402" y="440" font-size="12" font-family="sans-serif">melgar_2015</text>
+<circle cx="390" cy="454" r="4" fill="#f58518"/>
+<text x="402" y="458" font-size="12" font-family="sans-serif">crowell_2016_gfast</text>
+<circle cx="390" cy="472" r="4" fill="#54a24b"/>
+<text x="402" y="476" font-size="12" font-family="sans-serif">ruhl_2019</text>
+<text x="280.0" y="500" text-anchor="middle" font-size="12" font-family="sans-serif">catalog Mw</text>
+<text x="22" y="230.0" transform="rotate(-90 22 230.0)" text-anchor="middle" font-size="12" font-family="sans-serif">estimated Mw</text>
+</svg>
