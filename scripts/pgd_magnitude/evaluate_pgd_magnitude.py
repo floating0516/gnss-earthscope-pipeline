@@ -9,10 +9,17 @@ import gzip
 import json
 import math
 import statistics
+import sys
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+import pgd_contract
 
 
 @dataclass(frozen=True)
@@ -31,6 +38,15 @@ SCALING_LAWS = [
 ]
 
 TARGET_COUNTRIES = {"United States", "New Zealand", "Mexico"}
+EVENT_DIR_COUNTRY_OVERRIDES = {"nz": ("New Zealand", "New Zealand")}
+STATION_AGGREGATION = pgd_contract.STATION_AGGREGATION_METHOD
+STALE_PRE_MEDIAN_CONTRACT_OUTPUTS = [
+    "method_summary_raw.tsv",
+    "method_summary.tsv",
+    "method_summary_by_magnitude_bin.tsv",
+    "method_summary_quality_filtered_by_magnitude_bin.tsv",
+]
+STALE_PRE_MEDIAN_CONTRACT_FIGURES = ["method_mae_by_region.svg"]
 
 
 def parse_args() -> argparse.Namespace:
@@ -43,8 +59,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--pgd-window-end", type=float, default=600.0)
     parser.add_argument("--pgd-component", choices=["3d", "horizontal"], default="3d")
     parser.add_argument("--distance", choices=["hypocentral", "epicentral"], default="hypocentral")
-    parser.add_argument("--station-aggregation", choices=["median", "mean", "trimmed-mean"], default="median")
-    parser.add_argument("--trim-fraction", type=float, default=0.20)
+    parser.add_argument("--station-aggregation", choices=[STATION_AGGREGATION], default=STATION_AGGREGATION)
     parser.add_argument("--max-pgd-time-offset", type=float, default=0.0)
     parser.add_argument("--noise-window-start", type=float, default=-300.0)
     parser.add_argument("--noise-window-end", type=float, default=0.0)
@@ -64,6 +79,17 @@ def load_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def remove_stale_pre_median_contract_outputs(out_root: Path, figure_root: Path) -> None:
+    for name in STALE_PRE_MEDIAN_CONTRACT_OUTPUTS:
+        path = out_root / name
+        if path.is_file():
+            path.unlink()
+    for name in STALE_PRE_MEDIAN_CONTRACT_FIGURES:
+        path = figure_root / name
+        if path.is_file():
+            path.unlink()
+
+
 def read_stations(path: Path) -> dict[str, dict[str, str]]:
     with path.open(newline="") as handle:
         return {row["Station"].upper(): row for row in csv.DictReader(handle)}
@@ -80,11 +106,12 @@ def finite_float(value: object) -> float:
 def iter_event_dirs(root: Path, countries: set[str]) -> Iterable[Path]:
     for event_json in sorted(root.glob("*/event.json")):
         event = load_json(event_json)
-        if event.get("country") in countries:
+        event_dir = event_json.parent
+        if event_country_value(event, event_dir) in countries:
             station_path = event_json.parent / "stations.csv"
             waveform_path = event_json.parent / "waveforms.csv.gz"
             if station_path.exists() and waveform_path.exists():
-                yield event_json.parent
+                yield event_dir
 
 
 def displacement_amplitude(e: float, n: float, u: float, pgd_component: str) -> float:
@@ -197,20 +224,7 @@ def mean(values: list[float]) -> float:
     return sum(values) / len(values) if values else math.nan
 
 
-def trimmed_mean(values: list[float], trim_fraction: float) -> float:
-    if not values:
-        return math.nan
-    ordered = sorted(values)
-    trim_count = int(len(ordered) * max(0.0, min(trim_fraction, 0.45)))
-    trimmed = ordered[trim_count : len(ordered) - trim_count] if trim_count else ordered
-    return mean(trimmed or ordered)
-
-
-def aggregate_station_estimates(values: list[float], method: str, trim_fraction: float) -> float:
-    if method == "mean":
-        return mean(values)
-    if method == "trimmed-mean":
-        return trimmed_mean(values, trim_fraction)
+def aggregate_station_estimates(values: list[float]) -> float:
     return median(values)
 
 
@@ -301,12 +315,43 @@ def fmt(value: object, digits: int = 6) -> str:
     return f"{number:.{digits}f}"
 
 
+def event_dir_prefix(event_dir: Path) -> str:
+    return event_dir.name.split("-", 1)[0].lower()
+
+
+def event_country_value(event: dict[str, object], event_dir: Path) -> object:
+    override = EVENT_DIR_COUNTRY_OVERRIDES.get(event_dir_prefix(event_dir))
+    if override:
+        return override[0]
+    return event.get("country") or ""
+
+
+def event_region_value(event: dict[str, object], event_dir: Path) -> object:
+    override = EVENT_DIR_COUNTRY_OVERRIDES.get(event_dir_prefix(event_dir))
+    if override:
+        return override[1]
+    return event.get("region") or ""
+
+
+def event_time_value(event: dict[str, object]) -> object:
+    return event.get("event_time") or event.get("date") or event.get("time_utc") or ""
+
+
+def event_place_value(event: dict[str, object]) -> object:
+    return event.get("place") or event.get("region") or event.get("event") or event.get("title") or ""
+
+
 def evaluate_event(event_dir: Path, args: argparse.Namespace) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
     event = load_json(event_dir / "event.json")
     magnitude = finite_float(event.get("magnitude"))
     depth_km = finite_float(event.get("depth_km"))
     if not math.isfinite(magnitude):
         return [], []
+    event_country = event_country_value(event, event_dir)
+    event_time = event_time_value(event)
+    event_place = event_place_value(event)
+    event_region = event_region_value(event, event_dir)
+    event_source = event.get("source") or event.get("source_label") or ""
 
     stations = read_stations(event_dir / "stations.csv")
     pgd_by_station = read_pgd_by_station(
@@ -358,9 +403,11 @@ def evaluate_event(event_dir: Path, args: argparse.Namespace) -> tuple[list[dict
                 {
                     "event_dir": event_dir.name,
                     "event_id": event.get("event_id") or event.get("usgs_event_id") or "",
-                    "event_time": event.get("date") or "",
-                    "country": event.get("country") or "",
-                    "place": event.get("place") or event.get("event") or "",
+                    "event_time": event_time,
+                    "country": event_country,
+                    "region": event_region,
+                    "source": event_source,
+                    "place": event_place,
                     "usgs_magnitude": magnitude,
                     "depth_km": depth_km,
                     "station": station,
@@ -385,7 +432,7 @@ def evaluate_event(event_dir: Path, args: argparse.Namespace) -> tuple[list[dict
                     "formula_pgd_unit": law.pgd_unit,
                     "pgd_component": args.pgd_component,
                     "distance_mode": args.distance,
-                    "station_aggregation": args.station_aggregation,
+                    "station_aggregation": STATION_AGGREGATION,
                     "estimated_mw": mw_estimate,
                     "residual_mw": residual,
                     "abs_residual_mw": abs(residual),
@@ -406,23 +453,25 @@ def evaluate_event(event_dir: Path, args: argparse.Namespace) -> tuple[list[dict
     for law_name, estimates in by_law.items():
         if len(estimates) < args.min_stations:
             continue
-        event_estimate = aggregate_station_estimates(estimates, args.station_aggregation, args.trim_fraction)
+        event_estimate = aggregate_station_estimates(estimates)
         usable_estimates = by_law_usable.get(law_name, [])
-        usable_event_estimate = aggregate_station_estimates(usable_estimates, args.station_aggregation, args.trim_fraction)
+        usable_event_estimate = aggregate_station_estimates(usable_estimates)
         residuals = [value - magnitude for value in estimates]
         event_rows.append(
             {
                 "event_dir": event_dir.name,
                 "event_id": event.get("event_id") or event.get("usgs_event_id") or "",
-                "event_time": event.get("date") or "",
-                "country": event.get("country") or "",
-                "place": event.get("place") or event.get("event") or "",
+                "event_time": event_time,
+                "country": event_country,
+                "region": event_region,
+                "source": event_source,
+                "place": event_place,
                 "usgs_magnitude": magnitude,
                 "depth_km": depth_km,
                 "formula": law_name,
                 "pgd_component": args.pgd_component,
                 "distance_mode": args.distance,
-                "station_aggregation": args.station_aggregation,
+                "station_aggregation": STATION_AGGREGATION,
                 "station_count": len(estimates),
                 "usable_station_count": usable_count,
                 "near_station_count": near_count,
@@ -605,7 +654,7 @@ def write_plots(event_rows: list[dict[str, object]], summary_rows: list[dict[str
     plot_w = width - 90
     plot_h = 260
     max_value = max([value for _, _, value in entries] + [1.0])
-    body = ['<text x="20" y="28" font-size="18" font-family="sans-serif">PGD method MAE by region</text>']
+    body = ['<text x="20" y="28" font-size="18" font-family="sans-serif">PGD formula MAE by region</text>']
     body.append(f'<rect x="{left}" y="{top}" width="{plot_w}" height="{plot_h}" fill="none" stroke="#777"/>')
     for tick in [0.0, max_value / 2.0, max_value]:
         y = scale(tick, 0.0, max_value, top + plot_h, top)
@@ -617,7 +666,7 @@ def write_plots(event_rows: list[dict[str, object]], summary_rows: list[dict[str
         bar_h = scale(value, 0.0, max_value, 0.0, plot_h)
         body.append(f'<rect x="{center - bar_w / 2:.1f}" y="{top + plot_h - bar_h:.1f}" width="{bar_w:.1f}" height="{bar_h:.1f}" fill="{colors[formula]}"><title>{svg_escape(country)} {labels[formula]} MAE={value:.3f}</title></rect>')
         body.append(f'<text x="{center:.1f}" y="{top + plot_h + 15}" text-anchor="middle" font-size="9" font-family="sans-serif" transform="rotate(55 {center:.1f} {top + plot_h + 15})">{svg_escape(country)} {labels[formula]}</text>')
-    write_svg(figure_root / "method_mae_by_region.svg", width, height, body)
+    write_svg(figure_root / "formula_mae_by_region.svg", width, height, body)
 
     width = 760
     height = 420
@@ -660,6 +709,8 @@ def main() -> int:
         "event_id",
         "event_time",
         "country",
+        "region",
+        "source",
         "place",
         "usgs_magnitude",
         "depth_km",
@@ -695,6 +746,8 @@ def main() -> int:
         "event_id",
         "event_time",
         "country",
+        "region",
+        "source",
         "place",
         "usgs_magnitude",
         "depth_km",
@@ -754,13 +807,15 @@ def main() -> int:
     filtered_bin_summary_rows = summarize_by_magnitude_bin(event_rows, quality_filtered=True)
     low_reliability_rows = low_reliability_events(event_rows)
 
+    remove_stale_pre_median_contract_outputs(args.out_root, args.figure_root)
+
     write_table(args.out_root / "station_pgd_magnitude.tsv", station_rows, station_fields)
     write_table(args.out_root / "event_pgd_magnitude_raw.tsv", raw_event_rows, event_fields)
-    write_table(args.out_root / "method_summary_raw.tsv", raw_summary_rows, summary_fields)
+    write_table(args.out_root / "formula_summary_raw.tsv", raw_summary_rows, summary_fields)
     write_table(args.out_root / "event_pgd_magnitude.tsv", event_rows, event_fields)
-    write_table(args.out_root / "method_summary.tsv", summary_rows, summary_fields)
-    write_table(args.out_root / "method_summary_by_magnitude_bin.tsv", bin_summary_rows, bin_summary_fields)
-    write_table(args.out_root / "method_summary_quality_filtered_by_magnitude_bin.tsv", filtered_bin_summary_rows, bin_summary_fields)
+    write_table(args.out_root / "formula_summary.tsv", summary_rows, summary_fields)
+    write_table(args.out_root / "formula_summary_by_magnitude_bin.tsv", bin_summary_rows, bin_summary_fields)
+    write_table(args.out_root / "formula_summary_quality_filtered_by_magnitude_bin.tsv", filtered_bin_summary_rows, bin_summary_fields)
     write_table(args.out_root / "low_reliability_events.tsv", low_reliability_rows, low_reliability_fields)
     if event_rows:
         write_plots(event_rows, summary_rows, args.figure_root)
@@ -779,7 +834,7 @@ def main() -> int:
         "pgd_window_seconds": [args.pgd_window_start, args.pgd_window_end],
         "pgd_component": args.pgd_component,
         "distance_mode": args.distance,
-        "station_aggregation": args.station_aggregation,
+        "station_aggregation": STATION_AGGREGATION,
         "max_distance_km": args.max_distance_km,
         "max_pgd_time_offset": args.max_pgd_time_offset,
         "min_pgd_snr": args.min_pgd_snr,
