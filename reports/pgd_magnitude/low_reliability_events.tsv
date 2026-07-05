@@ -7,6 +7,16 @@ us7000ia36	2022-09-22T06:16:09.459Z	Mexico	55 km SSW of Aguililla, Mexico	6.8000
 us7000imgl	2022-11-04T10:02:46.346Z	Mexico	82 km SSW of Bahía de Kino, Mexico	6.100000	6.0-7.0	1	0	1		166.646307	UNUSABLE	low_pgd_snr
 us7000kfnc	2023-07-14T09:29:00.404Z	Mexico	Offshore Chiapas, Mexico	6.300000	6.0-7.0	1	0	1		242.607266	UNUSABLE	low_pgd_snr
 us7000rm3k	2026-01-02T13:58:15.741Z	Mexico	0 km W of San Marcos, Mexico	6.500000	6.0-7.0	1	0	1		207.017029	UNUSABLE	low_pgd_snr
+2013p944608	2013-12-16T12:07:24Z	New Zealand	120 km west of Tuatapere	6.100000	6.0-7.0	4	1	4	3.249596	179.893512	LOW	late_pgd_peak
+2014p051675	2014-01-20T02:52:45Z	New Zealand	10 km east of Eketahuna	6.200000	6.0-7.0	12	1	12	3.690456	51.660165	LOW	late_pgd_peak,low_pgd_snr
+2014p770859	2014-10-13T05:13:41Z	New Zealand	140 km west of Tuatapere	6.200000	6.0-7.0	1	0	1		64.798138	UNUSABLE	late_pgd_peak,low_pgd_snr
+2014p864702	2014-11-16T22:33:17Z	New Zealand	150 km east of Te Araroa	6.500000	6.0-7.0	6	1	6	3.055999	181.739384	LOW	late_pgd_peak,low_pgd_snr
+2015p305812	2015-04-24T03:36:42Z	New Zealand	35 km south-east of St Arnaud	6.200000	6.0-7.0	3	1	2	4.060270	76.241891	LOW	late_pgd_peak,low_pgd_snr
+2016p661400	2016-09-01T17:14:05Z	New Zealand	105 km north-east of Te Araroa	6.200000	6.0-7.0	8	2	8	3.187792	164.379035	LOW	late_pgd_peak,low_pgd_snr
+2016p858007	2016-11-13T11:05:14Z	New Zealand	45 km south-west of Seddon	6.000000	6.0-7.0	22	2	22	5.578345	148.467382	LOW	low_pgd_snr
+2016p858021	2016-11-13T11:12:35Z	New Zealand	5 km east of Kaikoura	6.000000	6.0-7.0	20	0	20		162.855379	UNUSABLE	late_pgd_peak,low_pgd_snr
+2025p224518	2025-03-25T01:43:09Z	New Zealand	155 km north-west of Snares Islands	6.800000	6.0-7.0	3	1	3	3.141953	200.895715	LOW	late_pgd_peak,low_pgd_snr
+2025p506857	2025-07-07T12:53:41Z	New Zealand	120 km north-west of Snares Islands	6.100000	6.0-7.0	5	1	5	3.065144	227.873185	LOW	late_pgd_peak,low_pgd_snr
 ak0149guzic1	2014-07-25T10:54:50.417000Z	United States	40 km WNW of Elfin Cove, Alaska	6.000000	6.0-7.0	3	2	3	3.168473	142.068380	LOW	late_pgd_peak
 ak0156uj8rk3	2015-05-29T07:00:09.634000Z	United States	117 km SSE of Ugashik, Alaska	6.800000	6.0-7.0	5	2	5	3.234172	150.082964	LOW	low_pgd_snr
 ak0159nc9dk8	2015-07-29T02:35:59.449000Z	United States	52 km ENE of Pedro Bay, Alaska	6.400000	6.0-7.0	24	0	24		140.080694	UNUSABLE	late_pgd_peak,low_pgd_snr
