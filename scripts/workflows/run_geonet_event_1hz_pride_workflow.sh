@@ -31,6 +31,11 @@ Options:
   --download-source SOURCE  rolling or event-highrate. Default: rolling
   --no-auto-hours           For event-highrate, keep the default/requested --hours instead of adapting to obs coverage
   --merge-method METHOD     auto, gfzrnx, or python. Default: auto
+  --geonet-db FILE          GeoNet metadata SQLite DB. Default: data/geonet_availability/geonet_1hz.sqlite
+  --normalized-root DIR     Final normalized export root
+  --include-warn-normalize  Include WARN stations in normalized package (default: on)
+  --overwrite-normalized    Replace an existing normalized event package
+  --skip-normalize          Do not write a normalized event package
   --skip-process            Download only, do not run PRIDE
   --skip-plot               Do not generate final normalized map/waveform figures
   --cleanup-downloads       After a successful workflow, remove compressed/raw downloader intermediates (default: on)
@@ -59,6 +64,8 @@ EVENT_HIGHRATE_DOWNLOADER="${PIPELINE_ROOT}/tools/geonet_downloader/fetch_geonet
 PRIDE_PROCESSOR="${PIPELINE_ROOT}/tools/pride_processor/process_event_window.sh"
 PRIDE_CLEANER="${PIPELINE_ROOT}/tools/pride_processor/cleanup_pride_workdir.sh"
 QUALITY_SCRIPT="${PIPELINE_ROOT}/scripts/quality/compute_kin_quality.py"
+GEONET_NORMALIZER="${PIPELINE_ROOT}/scripts/normalize/normalize_geonet_pride_kin_event.py"
+VALIDATOR="${PIPELINE_ROOT}/scripts/summaries/validate_normalized_export.py"
 WINDOW_ESTIMATOR="${PIPELINE_ROOT}/tools/pride_processor/estimate_obs_event_window.py"
 
 absolute_path() {
@@ -76,6 +83,8 @@ MAX_STATIONS="0"
 PROCESS_JOBS="1"
 RUN_ROOT="${PIPELINE_ROOT}/runs"
 OBS_ROOT="${PIPELINE_ROOT}/data/obs"
+GEONET_DB="${GEONET_DB:-${PIPELINE_ROOT}/data/geonet_availability/geonet_1hz.sqlite}"
+FINAL_NORMALIZED_ROOT="${FINAL_NORMALIZED_ROOT:-${PIPELINE_ROOT}/exports/normalized-ok-stations-us-nz}"
 STATIONS_FILE=""
 SKIP_DOWNLOAD="0"
 FORCE_DOWNLOAD="0"
@@ -93,6 +102,9 @@ AUTO_HOURS_FROM_OBS="1"
 AUTO_WINDOW_STATUS="SKIPPED"
 AUTO_WINDOW_JSON=""
 REQUESTED_HOURS="$HOURS"
+INCLUDE_WARN_NORMALIZE="1"
+OVERWRITE_NORMALIZED="0"
+SKIP_NORMALIZE="0"
 declare -a STATIONS=()
 declare -A SEEN_STATIONS=()
 
@@ -140,6 +152,11 @@ while [[ $# -gt 0 ]]; do
     --download-source) DOWNLOAD_SOURCE="$2"; shift 2 ;;
     --no-auto-hours) AUTO_HOURS_FROM_OBS="0"; shift ;;
     --merge-method) MERGE_METHOD="$2"; shift 2 ;;
+    --geonet-db) GEONET_DB="$2"; shift 2 ;;
+    --normalized-root) FINAL_NORMALIZED_ROOT="$2"; shift 2 ;;
+    --include-warn-normalize) INCLUDE_WARN_NORMALIZE="1"; shift ;;
+    --overwrite-normalized) OVERWRITE_NORMALIZED="1"; shift ;;
+    --skip-normalize) SKIP_NORMALIZE="1"; shift ;;
     --skip-process) SKIP_PROCESS="1"; shift ;;
     --skip-plot) SKIP_PLOT="1"; shift ;;
     --post-seconds) shift 2 ;; # Deprecated compatibility option.
@@ -175,6 +192,8 @@ fi
 
 RUN_ROOT="$(absolute_path "$RUN_ROOT")"
 OBS_ROOT="$(absolute_path "$OBS_ROOT")"
+GEONET_DB="$(absolute_path "$GEONET_DB")"
+FINAL_NORMALIZED_ROOT="$(absolute_path "$FINAL_NORMALIZED_ROOT")"
 if [[ -n "$STATIONS_FILE" ]]; then
   STATIONS_FILE="$(absolute_path "$STATIONS_FILE")"
 fi
@@ -207,6 +226,10 @@ if [[ ! -x "$PRIDE_PROCESSOR" ]]; then
 fi
 if [[ ! -x "$PRIDE_CLEANER" ]]; then
   echo "PRIDE cleaner not found or not executable: $PRIDE_CLEANER" >&2
+  exit 1
+fi
+if [[ ! -x "$GEONET_NORMALIZER" ]]; then
+  echo "GeoNet normalizer not found or not executable: $GEONET_NORMALIZER" >&2
   exit 1
 fi
 if [[ ! -x "$WINDOW_ESTIMATOR" ]]; then
@@ -283,6 +306,17 @@ if [[ "$DRY_RUN" == "1" ]]; then
     printf '  %q --event-id %q --event-time %q --hours %q --interval %q --process-jobs %q --obs-dir %q --run-root %q\n' \
       "$PRIDE_PROCESSOR" "$EVENT_ID" "$EVENT_TIME_UTC" "$HOURS" "$INTERVAL" "$PROCESS_JOBS" "$OBS_DIR" "$PRIDE_RUN_ROOT"
   fi
+  if [[ "$SKIP_NORMALIZE" == "0" ]]; then
+    printf '  python3 %q --workflow-summary <workflow-summary.json> --quality-json <kin-quality.json> --db %q --normalized-root %q' \
+      "$GEONET_NORMALIZER" "$GEONET_DB" "$FINAL_NORMALIZED_ROOT"
+    if [[ "$INCLUDE_WARN_NORMALIZE" == "1" ]]; then
+      printf ' --include-warn'
+    fi
+    if [[ "$OVERWRITE_NORMALIZED" == "1" ]]; then
+      printf ' --overwrite'
+    fi
+    printf '\n'
+  fi
   if [[ "$CLEANUP_DOWNLOADS" == "1" ]]; then
     printf '  find %q -type f <geonet-raw-download-patterns> -print -delete\n' "$DOWNLOAD_DIR"
   fi
@@ -315,6 +349,11 @@ normalized_station_count="0"
 normalized_waveform_rows="0"
 normalized_event_grade=""
 normalized_event_dir=""
+NORMALIZED_VALIDATION_JSON="${REPORT_DIR}/normalized-export-validation.json"
+NORMALIZE_JSON="${REPORT_DIR}/normalize-geonet-output.json"
+normalized_validation_status="SKIPPED"
+normalized_export_valid="false"
+normalized_validation_errors=""
 
 write_obs_inventory() {
   find "$OBS_DIR" -maxdepth 1 -type f \( -name "*.rnx" -o -name "*.[0-9][0-9]o" -o -name "*.obs" \) \
@@ -542,6 +581,131 @@ else
   fi
 fi
 
+WORKFLOW_JSON="${REPORT_DIR}/workflow-summary.json"
+export EVENT_ID EVENT_TIME_UTC YEAR DOY HOURS REQUESTED_HOURS HOURS_USER_SET AUTO_HOURS_FROM_OBS AUTO_WINDOW_STATUS AUTO_WINDOW_JSON INTERVAL download_status process_status plot_status quality_status obs_validation_status normalized_status
+export WORKFLOW_DIR DOWNLOAD_DIR OBS_DIR PRIDE_RUN_ROOT LOG_DIR MANIFEST_DIR REPORT_DIR
+export KIN_QUALITY_TSV KIN_QUALITY_JSON NORMALIZE_JSON
+python3 - "$WORKFLOW_JSON" <<'PY'
+import json
+import os
+import sys
+from pathlib import Path
+
+
+def read_lines(path):
+    if not path or not Path(path).exists():
+        return []
+    return [line.strip() for line in Path(path).read_text().splitlines() if line.strip()]
+
+
+def as_int(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+summary = {
+    "source": "GeoNet",
+    "event": {
+        "id": os.environ["EVENT_ID"],
+        "time_utc": os.environ["EVENT_TIME_UTC"],
+        "year": os.environ["YEAR"],
+        "doy": os.environ["DOY"],
+    },
+    "parameters": {
+        "process_window_hours_each_side": float(os.environ["HOURS"]),
+        "requested_hours_each_side": float(os.environ.get("REQUESTED_HOURS") or os.environ["HOURS"]),
+        "hours_user_set": os.environ.get("HOURS_USER_SET") == "1",
+        "auto_hours_from_obs": os.environ.get("AUTO_HOURS_FROM_OBS") == "1",
+        "auto_window_status": os.environ.get("AUTO_WINDOW_STATUS", ""),
+        "interval_seconds": as_int(os.environ["INTERVAL"]),
+    },
+    "status": {
+        "download": os.environ["download_status"],
+        "obs_validation": os.environ["obs_validation_status"],
+        "process": os.environ["process_status"],
+        "plot": os.environ["plot_status"],
+        "quality": os.environ["quality_status"],
+        "normalized": os.environ["normalized_status"],
+    },
+    "paths": {
+        "workflow_dir": os.environ["WORKFLOW_DIR"],
+        "download_dir": os.environ["DOWNLOAD_DIR"],
+        "obs_dir": os.environ["OBS_DIR"],
+        "pride_run_root": os.environ["PRIDE_RUN_ROOT"],
+        "logs_dir": os.environ["LOG_DIR"],
+        "manifests_dir": os.environ["MANIFEST_DIR"],
+        "reports_dir": os.environ["REPORT_DIR"],
+        "kin_quality_tsv": os.environ["KIN_QUALITY_TSV"],
+        "kin_quality_json": os.environ["KIN_QUALITY_JSON"],
+        "normalize_json": os.environ["NORMALIZE_JSON"],
+    },
+    "files": {
+        "kin": read_lines(Path(os.environ["MANIFEST_DIR"]) / "kin-files.txt"),
+    },
+}
+Path(sys.argv[1]).write_text(json.dumps(summary, indent=2, ensure_ascii=False) + "\n")
+PY
+
+if [[ "$SKIP_NORMALIZE" == "1" ]]; then
+  normalized_status="SKIPPED_NORMALIZE"
+elif (( kin_count == 0 )); then
+  normalized_status="SKIPPED_NO_KIN"
+elif [[ "$quality_status" == "OK" || "$quality_status" == "WARN" ]]; then
+  normalize_cmd=(
+    python3 "$GEONET_NORMALIZER"
+    --workflow-summary "$WORKFLOW_JSON"
+    --quality-json "$KIN_QUALITY_JSON"
+    --db "$GEONET_DB"
+    --normalized-root "$FINAL_NORMALIZED_ROOT"
+  )
+  if [[ "$INCLUDE_WARN_NORMALIZE" == "1" ]]; then
+    normalize_cmd+=(--include-warn)
+  fi
+  if [[ "$OVERWRITE_NORMALIZED" == "1" ]]; then
+    normalize_cmd+=(--overwrite)
+  fi
+
+  echo
+  echo "Normalizing GeoNet PRIDE kin outputs..."
+  if "${normalize_cmd[@]}" > "$NORMALIZE_JSON" 2> "${LOG_DIR}/normalize-geonet.log"; then
+    while IFS=$'\t' read -r key value; do
+      case "$key" in
+        normalized_status) normalized_status="$value" ;;
+        normalized_event_dir) normalized_event_dir="$value" ;;
+        normalized_station_count) normalized_station_count="$value" ;;
+        normalized_waveform_rows) normalized_waveform_rows="$value" ;;
+        normalized_event_grade) normalized_event_grade="$value" ;;
+      esac
+    done < <(python3 - "$NORMALIZE_JSON" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+payload = json.loads(Path(sys.argv[1]).read_text())
+mapping = {
+    "normalized_status": payload.get("normalized_status", ""),
+    "normalized_event_dir": payload.get("normalized_event_dir", ""),
+    "normalized_station_count": payload.get("normalized_station_count", 0),
+    "normalized_waveform_rows": payload.get("normalized_waveform_rows", 0),
+    "normalized_event_grade": payload.get("event_grade", ""),
+}
+for key, value in mapping.items():
+    print(f"{key}\t{value}")
+PY
+)
+  else
+    normalized_status="FAIL"
+    normalized_validation_status="SKIPPED_NORMALIZE_FAILED"
+    echo "GeoNet normalization failed. See ${LOG_DIR}/normalize-geonet.log" >&2
+  fi
+elif [[ "$quality_status" == "FAIL" ]]; then
+  normalized_status="SKIPPED_QUALITY_FAIL"
+else
+  normalized_status="SKIPPED_QUALITY_${quality_status}"
+fi
+
 cleanup_status="SKIPPED"
 pride_cleanup_status="SKIPPED"
 obs_cleanup_status="SKIPPED"
@@ -607,6 +771,37 @@ if [[ "$CLEANUP_OBS" == "1" ]]; then
   fi
 fi
 
+if [[ "$normalized_status" == "OK" ]]; then
+  echo
+  echo "Validating normalized export package..."
+  if python3 "$VALIDATOR" \
+      --root "$FINAL_NORMALIZED_ROOT" \
+      --event-id "$EVENT_ID" \
+      --json-out "$NORMALIZED_VALIDATION_JSON" \
+      > "${LOG_DIR}/normalized-export-validation.log" 2>&1; then
+    normalized_validation_status="OK"
+    normalized_export_valid="true"
+  else
+    normalized_validation_status="FAIL"
+    normalized_export_valid="false"
+    echo "Normalized export validation failed. See ${LOG_DIR}/normalized-export-validation.log" >&2
+  fi
+  normalized_validation_errors="$(python3 - "$NORMALIZED_VALIDATION_JSON" <<'PY'
+import json
+import sys
+from pathlib import Path
+path = Path(sys.argv[1])
+if not path.exists():
+    print("")
+else:
+    try:
+        print(json.loads(path.read_text()).get("error_count", ""))
+    except json.JSONDecodeError:
+        print("")
+PY
+)"
+fi
+
 workflow_end_epoch="$(date -u +%s)"
 duration_seconds=$((workflow_end_epoch - workflow_start_epoch))
 
@@ -636,6 +831,11 @@ duration_seconds=$((workflow_end_epoch - workflow_start_epoch))
   printf 'normalized_waveform_rows\t%s\n' "$normalized_waveform_rows"
   printf 'normalized_event_grade\t%s\n' "$normalized_event_grade"
   printf 'normalized_event_dir\t%s\n' "$normalized_event_dir"
+  printf 'normalized_validation_status\t%s\n' "$normalized_validation_status"
+  printf 'normalized_export_valid\t%s\n' "$normalized_export_valid"
+  printf 'normalized_validation_errors\t%s\n' "$normalized_validation_errors"
+  printf 'normalized_validation_json\t%s\n' "$NORMALIZED_VALIDATION_JSON"
+  printf 'normalize_json\t%s\n' "$NORMALIZE_JSON"
   printf 'obs_validation_status\t%s\n' "$obs_validation_status"
   printf 'cleanup_status\t%s\n' "$cleanup_status"
   printf 'pride_cleanup_status\t%s\n' "$pride_cleanup_status"
@@ -648,17 +848,18 @@ duration_seconds=$((workflow_end_epoch - workflow_start_epoch))
   printf 'workflow_dir\t%s\n' "$WORKFLOW_DIR"
   printf 'download_dir\t%s\n' "$DOWNLOAD_DIR"
   printf 'obs_dir\t%s\n' "$OBS_DIR"
+  printf 'geonet_db\t%s\n' "$GEONET_DB"
   printf 'pride_run_root\t%s\n' "$PRIDE_RUN_ROOT"
   printf 'kin_quality_tsv\t%s\n' "$KIN_QUALITY_TSV"
   printf 'kin_quality_json\t%s\n' "$KIN_QUALITY_JSON"
   printf 'pride_summary\t%s\n' "$latest_pride_summary"
 } > "${REPORT_DIR}/workflow-summary.tsv"
 
-WORKFLOW_JSON="${REPORT_DIR}/workflow-summary.json"
-export EVENT_ID EVENT_TIME_UTC YEAR DOY HOURS REQUESTED_HOURS HOURS_USER_SET AUTO_HOURS_FROM_OBS AUTO_WINDOW_STATUS AUTO_WINDOW_JSON INTERVAL download_status process_status plot_status quality_status obs_validation_status cleanup_status pride_cleanup_status obs_cleanup_status normalized_status normalized_station_count normalized_waveform_rows normalized_event_grade normalized_event_dir duration_seconds
+export EVENT_ID EVENT_TIME_UTC YEAR DOY HOURS REQUESTED_HOURS HOURS_USER_SET AUTO_HOURS_FROM_OBS AUTO_WINDOW_STATUS AUTO_WINDOW_JSON INTERVAL download_status process_status plot_status quality_status obs_validation_status cleanup_status pride_cleanup_status obs_cleanup_status normalized_status normalized_station_count normalized_waveform_rows normalized_event_grade normalized_event_dir normalized_validation_status normalized_export_valid normalized_validation_errors duration_seconds
 export WORKFLOW_DIR DOWNLOAD_DIR OBS_DIR PRIDE_RUN_ROOT LOG_DIR MANIFEST_DIR REPORT_DIR latest_pride_summary
 export REQUESTED_STATION_COUNT="${#STATIONS[@]}" OBS_COUNT="$obs_count" KIN_COUNT="$kin_count" PLOT_COUNT="$plot_count"
 export KIN_QUALITY_TSV KIN_QUALITY_JSON
+export NORMALIZED_VALIDATION_JSON NORMALIZE_JSON GEONET_DB
 
 python3 - "$WORKFLOW_JSON" <<'PY'
 import csv
@@ -720,6 +921,8 @@ summary = {
         "plot": os.environ["plot_status"],
         "quality": os.environ["quality_status"],
         "normalized": os.environ["normalized_status"],
+        "normalized_validation": os.environ["normalized_validation_status"],
+        "normalized_export_valid": os.environ["normalized_export_valid"] == "true",
         "cleanup": os.environ["cleanup_status"],
         "pride_cleanup": os.environ["pride_cleanup_status"],
         "obs_cleanup": os.environ["obs_cleanup_status"],
@@ -731,12 +934,14 @@ summary = {
         "plot_files": as_int(os.environ["PLOT_COUNT"]),
         "normalized_stations": as_int(os.environ["normalized_station_count"]),
         "normalized_waveform_rows": as_int(os.environ["normalized_waveform_rows"]),
+        "normalized_validation_errors": as_int(os.environ["normalized_validation_errors"]),
     },
     "duration_seconds": as_int(os.environ["duration_seconds"]),
     "paths": {
         "workflow_dir": os.environ["WORKFLOW_DIR"],
         "download_dir": os.environ["DOWNLOAD_DIR"],
         "obs_dir": os.environ["OBS_DIR"],
+        "geonet_db": os.environ["GEONET_DB"],
         "pride_run_root": os.environ["PRIDE_RUN_ROOT"],
         "logs_dir": os.environ["LOG_DIR"],
         "manifests_dir": os.environ["MANIFEST_DIR"],
@@ -747,6 +952,8 @@ summary = {
         "auto_window_json": os.environ.get("AUTO_WINDOW_JSON", ""),
         "normalized_event_dir": os.environ.get("normalized_event_dir", ""),
         "normalized_event_grade": os.environ.get("normalized_event_grade", ""),
+        "normalized_validation_json": os.environ.get("NORMALIZED_VALIDATION_JSON", ""),
+        "normalize_json": os.environ.get("NORMALIZE_JSON", ""),
     },
     "auto_window": read_json(os.environ.get("AUTO_WINDOW_JSON")),
     "geonet_download": read_json(Path(os.environ["MANIFEST_DIR"]) / "geonet-download-summary.json"),
@@ -771,6 +978,10 @@ PY
   printf '%s\n' "- Plot status: \`${plot_status}\`"
   printf '%s\n' "- Quality status: \`${quality_status}\`"
   printf '%s\n' "- Normalized status: \`${normalized_status}\`"
+  printf '%s\n' "- Normalized validation: \`${normalized_validation_status}\`"
+  printf '%s\n' "- Normalized export valid: \`${normalized_export_valid}\`"
+  printf '%s\n' "- Normalized validation errors: \`${normalized_validation_errors}\`"
+  printf '%s\n' "- Normalize JSON: \`${NORMALIZE_JSON}\`"
   printf '%s\n' "- Obs validation: \`${obs_validation_status}\`"
   printf '%s\n' "- Cleanup status: \`${cleanup_status}\`"
   printf '%s\n' "- PRIDE cleanup status: \`${pride_cleanup_status}\`"
@@ -784,10 +995,12 @@ PY
   printf '%s\n' "- Workflow directory: \`${WORKFLOW_DIR}\`"
   printf '%s\n' "- GeoNet downloads: \`${DOWNLOAD_DIR}\`"
   printf '%s\n' "- Canonical obs files: \`${OBS_DIR}\`"
+  printf '%s\n' "- GeoNet DB: \`${GEONET_DB}\`"
   printf '%s\n' "- PRIDE runs: \`${PRIDE_RUN_ROOT}\`"
   printf '%s\n' "- Logs: \`${LOG_DIR}\`"
   printf '%s\n' "- Manifests: \`${MANIFEST_DIR}\`"
   printf '%s\n' "- Reports: \`${REPORT_DIR}\`"
+  printf '%s\n' "- Normalized validation JSON: \`${NORMALIZED_VALIDATION_JSON}\`"
   printf '%s\n' "- JSON summary: \`${WORKFLOW_JSON}\`"
 } > "${REPORT_DIR}/workflow-summary.md"
 
@@ -799,10 +1012,31 @@ echo "Machine-readable summary: ${REPORT_DIR}/workflow-summary.tsv"
 final_plot_status="SKIPPED"
 if [[ "$SKIP_PLOT" == "0" && "$download_status" != "FAIL" && "$process_status" != "FAIL" && "$process_status" != "BLOCKED_OBS_VALIDATION" && "$quality_status" != "FAIL" ]]; then
   if [[ "$normalized_status" != "OK" ]]; then
-    final_plot_status="BLOCKED_NORMALIZE_UNSUPPORTED"
+    case "$normalized_status" in
+      SKIPPED_NORMALIZE)
+        final_plot_status="BLOCKED_NORMALIZE_SKIPPED"
+        ;;
+      SKIPPED_NO_KIN)
+        final_plot_status="BLOCKED_NO_KIN"
+        ;;
+      SKIPPED_QUALITY_FAIL)
+        final_plot_status="BLOCKED_QUALITY_FAIL"
+        ;;
+      FAIL)
+        final_plot_status="BLOCKED_NORMALIZE_FAILED"
+        ;;
+      *)
+        final_plot_status="BLOCKED_NORMALIZE_UNAVAILABLE"
+        ;;
+    esac
     : > "${MANIFEST_DIR}/plot-files.txt"
     echo
-    echo "Skipping final normalized plot stage: GeoNet normalization is not implemented in this workflow."
+    echo "Skipping final normalized plot stage: normalized export is not available (${normalized_status})."
+  elif [[ "$normalized_validation_status" != "OK" ]]; then
+    final_plot_status="BLOCKED_NORMALIZE_VALIDATION"
+    : > "${MANIFEST_DIR}/plot-files.txt"
+    echo
+    echo "Skipping final normalized plot stage: normalized export validation did not pass."
   else
     echo
     echo "Running final normalized plot stage..."
@@ -835,6 +1069,12 @@ if [[ "$SKIP_PLOT" == "0" && "$download_status" != "FAIL" && "$process_status" !
     --plot-files "${MANIFEST_DIR}/plot-files.txt"
 fi
 
-if [[ "$download_status" == "FAIL" || "$process_status" == "FAIL" || "$process_status" == "BLOCKED_OBS_VALIDATION" || "$quality_status" == "FAIL" || "$pride_cleanup_status" == "FAIL" || "$obs_cleanup_status" == "FAIL" || "$final_plot_status" == "FAIL" ]]; then
+python3 "${PIPELINE_ROOT}/scripts/workflows/update_workflow_summary_status.py" \
+  --summary-json "$WORKFLOW_JSON" \
+  --summary-tsv "${REPORT_DIR}/workflow-summary.tsv" \
+  --summary-md "${REPORT_DIR}/workflow-summary.md" \
+  --derive-failure
+
+if [[ "$download_status" == "FAIL" || "$process_status" == "FAIL" || "$process_status" == "BLOCKED_OBS_VALIDATION" || "$quality_status" == "FAIL" || "$normalized_validation_status" == "FAIL" || "$pride_cleanup_status" == "FAIL" || "$obs_cleanup_status" == "FAIL" || "$final_plot_status" == "FAIL" ]]; then
   exit 1
 fi

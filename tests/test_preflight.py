@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import os
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from gnss_eq import preflight
@@ -90,6 +92,41 @@ class PreflightTest(unittest.TestCase):
         for env in calls:
             self.assertNotIn("http_proxy", env)
             self.assertNotIn("HTTPS_PROXY", env)
+
+    def test_json_report_can_be_written_to_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "preflight.json"
+            results = [preflight.CheckResult("PREFLIGHT_OK", "EarthScope preflight", "all blocking checks passed", fatal=False)]
+
+            preflight.write_json(results, 0, path=out)
+
+            payload = preflight.json.loads(out.read_text(encoding="utf-8"))
+            self.assertTrue(payload["ok"])
+            self.assertEqual(payload["exit_code"], 0)
+            self.assertEqual(payload["checks"][0]["name"], "EarthScope preflight")
+
+    def test_geonet_preflight_does_not_require_earthscope_auth(self):
+        def which(command, path=None):
+            return None if command == "es" else f"/usr/bin/{command}"
+
+        with patch.object(preflight.shutil, "which", side_effect=which):
+            with patch.object(preflight.subprocess, "run", side_effect=AssertionError("EarthScope auth should not run")):
+                results, rc = preflight.run_geonet_preflight(include_database=False)
+
+        self.assertEqual(rc, 0)
+        names = {result.name for result in results}
+        self.assertNotIn("EarthScope auth", names)
+        self.assertTrue(any(result.status == "PREFLIGHT_OK" and result.name == "GeoNet preflight" for result in results))
+
+    def test_geonet_preflight_still_requires_pride(self):
+        def which(command, path=None):
+            return None if command == "pdp3" else f"/usr/bin/{command}"
+
+        with patch.object(preflight.shutil, "which", side_effect=which):
+            results, rc = preflight.run_geonet_preflight(include_database=False)
+
+        self.assertEqual(rc, 2)
+        self.assertTrue(any(result.name == "command pdp3" and result.status == "MISSING" for result in results))
 
 
 if __name__ == "__main__":

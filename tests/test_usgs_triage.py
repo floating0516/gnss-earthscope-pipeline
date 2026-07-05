@@ -149,6 +149,12 @@ class UsgsTriageTest(unittest.TestCase):
         self.assertEqual(report["events"][0]["event_id"], "us-americas")
         self.assertEqual(report["events"][0]["priority"], "HIGH")
         self.assertEqual(report["events"][0]["suggested_action"], "REVIEW_PREPARE_BATCH")
+        self.assertEqual(report["events"][0]["recommended_source"], "earthscope")
+        self.assertEqual(report["events"][0]["routing_reason"], "americas_supported_by_earthscope")
+        self.assertTrue(report["events"][0]["processable_by_earthscope"])
+        self.assertFalse(report["events"][0]["processable_by_geonet"])
+        self.assertFalse(report["events"][0]["research_candidate_cddis"])
+        self.assertFalse(report["events"][0]["parked_source_candidate"])
         self.assertIn("export-batch --event-id us-americas", "\n".join(report["events"][0]["suggested_commands"]))
 
     def test_triage_reports_geonet_suggestion(self):
@@ -172,6 +178,12 @@ class UsgsTriageTest(unittest.TestCase):
         self.assertEqual(report["events"][0]["source"], "geonet")
         self.assertEqual(report["events"][0]["priority"], "MEDIUM")
         self.assertEqual(report["events"][0]["suggested_action"], "REVIEW_PREPARE_BATCH")
+        self.assertEqual(report["events"][0]["recommended_source"], "geonet")
+        self.assertEqual(report["events"][0]["routing_reason"], "new_zealand_supported_by_geonet")
+        self.assertFalse(report["events"][0]["processable_by_earthscope"])
+        self.assertTrue(report["events"][0]["processable_by_geonet"])
+        self.assertFalse(report["events"][0]["research_candidate_cddis"])
+        self.assertFalse(report["events"][0]["parked_source_candidate"])
         self.assertIn("run_geonet_batch_workflow.sh --help", "\n".join(report["events"][0]["suggested_commands"]))
 
     def test_south_america_event_is_not_routed_to_earthscope(self):
@@ -234,6 +246,12 @@ class UsgsTriageTest(unittest.TestCase):
 
         south = [event for event in report_all["events"] if event["event_id"] == "us-chile"][0]
         self.assertEqual(south["source"], "unsupported_south_america")
+        self.assertEqual(south["recommended_source"], "cddis_research")
+        self.assertEqual(south["routing_reason"], "south_america_outside_earthscope_production")
+        self.assertFalse(south["processable_by_earthscope"])
+        self.assertFalse(south["processable_by_geonet"])
+        self.assertTrue(south["research_candidate_cddis"])
+        self.assertFalse(south["parked_source_candidate"])
         self.assertEqual(south["priority"], "SKIP")
         self.assertEqual(south["suggested_action"], "CHECK_CDDIS_OR_OTHER_SOURCE")
         self.assertNotIn("us-chile", [event["event_id"] for event in report_earthscope["events"]])
@@ -311,6 +329,8 @@ class UsgsTriageTest(unittest.TestCase):
         self.assertTrue(payload["read_only"])
         self.assertNotIn("raw_json", payload["events"][0])
         self.assertIn("kind\tok\tsource", tsv_output.getvalue())
+        self.assertIn("recommended_source", tsv_output.getvalue())
+        self.assertIn("routing_reason", tsv_output.getvalue())
         self.assertIn("SUMMARY\tTrue\tearthscope", tsv_output.getvalue())
         self.assertIn("EVENT\tTrue\tearthscope\tMEDIUM", tsv_output.getvalue())
 

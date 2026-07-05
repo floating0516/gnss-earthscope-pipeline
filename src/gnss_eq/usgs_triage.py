@@ -39,6 +39,12 @@ TRIAGE_FIELDS = [
     "detail",
     "suggested_command",
     "reason",
+    "recommended_source",
+    "routing_reason",
+    "processable_by_earthscope",
+    "processable_by_geonet",
+    "research_candidate_cddis",
+    "parked_source_candidate",
 ]
 
 PRIORITY_RANK = {"HIGH": 0, "MEDIUM": 1, "LOW": 2, "SKIP": 3, "UNKNOWN": 4}
@@ -135,6 +141,45 @@ def processing_source_for_event(event: dict[str, Any]) -> str:
             return "unsupported_south_america"
         return "earthscope"
     return "unknown"
+
+
+def source_routing_for_event(event: dict[str, Any], source: str | None = None) -> dict[str, Any]:
+    source = source or processing_source_for_event(event)
+    if source == "earthscope":
+        return {
+            "recommended_source": "earthscope",
+            "routing_reason": "americas_supported_by_earthscope",
+            "processable_by_earthscope": True,
+            "processable_by_geonet": False,
+            "research_candidate_cddis": False,
+            "parked_source_candidate": False,
+        }
+    if source == "geonet":
+        return {
+            "recommended_source": "geonet",
+            "routing_reason": "new_zealand_supported_by_geonet",
+            "processable_by_earthscope": False,
+            "processable_by_geonet": True,
+            "research_candidate_cddis": False,
+            "parked_source_candidate": False,
+        }
+    if source == "unsupported_south_america":
+        return {
+            "recommended_source": "cddis_research",
+            "routing_reason": "south_america_outside_earthscope_production",
+            "processable_by_earthscope": False,
+            "processable_by_geonet": False,
+            "research_candidate_cddis": True,
+            "parked_source_candidate": False,
+        }
+    return {
+        "recommended_source": "manual_review",
+        "routing_reason": "region_not_mapped_to_production_source",
+        "processable_by_earthscope": False,
+        "processable_by_geonet": False,
+        "research_candidate_cddis": False,
+        "parked_source_candidate": True,
+    }
 
 
 def _source_region_filter(source: str) -> tuple[str, ...]:
@@ -377,6 +422,7 @@ def _triage_event(
     workflow_ids: set[str],
 ) -> dict[str, Any]:
     source = processing_source_for_event(event)
+    routing = source_routing_for_event(event, source)
     availability = None
     if source == "earthscope":
         availability = earthscope_index.get(str(event["event_id"]))
@@ -391,6 +437,7 @@ def _triage_event(
     action = _suggested_action(priority, workflow_status, availability, db_available.get(source, False), source)
     triaged = {
         **event,
+        **routing,
         "source": source,
         "priority": priority,
         "suggested_action": action,
@@ -579,6 +626,12 @@ def write_triage_tsv(report: dict[str, Any]) -> None:
                 "detail": event.get("detail"),
                 "suggested_command": event.get("suggested_command"),
                 "reason": event.get("reason"),
+                "recommended_source": event.get("recommended_source"),
+                "routing_reason": event.get("routing_reason"),
+                "processable_by_earthscope": event.get("processable_by_earthscope"),
+                "processable_by_geonet": event.get("processable_by_geonet"),
+                "research_candidate_cddis": event.get("research_candidate_cddis"),
+                "parked_source_candidate": event.get("parked_source_candidate"),
             }
         )
 

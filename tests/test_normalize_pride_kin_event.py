@@ -16,8 +16,113 @@ if str(NORMALIZE_DIR) not in sys.path:
 
 import normalize_pride_kin_event as normalize
 
+VALIDATOR_PATH = ROOT / "scripts" / "summaries" / "validate_normalized_export.py"
+VALIDATOR_SPEC = __import__("importlib.util").util.spec_from_file_location("validate_normalized_export", VALIDATOR_PATH)
+validator = __import__("importlib.util").util.module_from_spec(VALIDATOR_SPEC)
+assert VALIDATOR_SPEC.loader is not None
+VALIDATOR_SPEC.loader.exec_module(validator)
+
 
 class NormalizePrideKinEventTest(unittest.TestCase):
+    def make_write_fixture(self, tmp_path: Path, overwrite: bool = False):
+        db_path = tmp_path / "events.sqlite"
+        normalized_root = tmp_path / "normalized"
+        workflow_root = tmp_path / "workflow"
+        reports_dir = workflow_root / "reports"
+        manifests_dir = workflow_root / "manifests"
+        workflow_summary = reports_dir / "workflow-summary.json"
+        quality_json = reports_dir / "kin-quality.json"
+        kin_file = tmp_path / "kin_2020001_good"
+
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            """
+            CREATE TABLE usgs_m6plus_events_earthscope_nonconus (
+                event_id TEXT PRIMARY KEY,
+                title TEXT,
+                time_utc TEXT,
+                event_date TEXT,
+                magnitude REAL,
+                longitude REAL,
+                latitude REAL,
+                depth_km REAL,
+                place TEXT,
+                usgs_url TEXT
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE event_earthscope_station_verified_files (
+                event_id TEXT,
+                station TEXT,
+                station_latitude REAL,
+                station_longitude REAL,
+                distance_km REAL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE event_earthscope_station_candidates (
+                event_id TEXT,
+                station TEXT,
+                station_latitude REAL,
+                station_longitude REAL,
+                distance_km REAL
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO usgs_m6plus_events_earthscope_nonconus
+            VALUES ('test-event', 'Test event', '2020-01-01T00:00:00Z', '2020-01-01', 6.1, -100.0, 20.0, 10.0, 'Test place', '')
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO event_earthscope_station_candidates
+            VALUES ('test-event', 'GOOD', 20.1, -100.1, 15.0)
+            """
+        )
+        conn.commit()
+        conn.close()
+
+        kin_file.write_text("END OF HEADER\n58849 18 1000 2000 3000\n58849 19 1001 2001 3001\n", encoding="utf-8")
+        manifests_dir.mkdir(parents=True)
+        reports_dir.mkdir(parents=True)
+        (manifests_dir / "kin-files.txt").write_text(f"{kin_file}\n", encoding="utf-8")
+        workflow_summary.write_text(
+            json.dumps({"event": {"id": "test-event", "time_utc": "2020-01-01T00:00:00Z"}}),
+            encoding="utf-8",
+        )
+        quality_json.write_text(
+            json.dumps(
+                {
+                    "schema_version": "kin-quality/v1",
+                    "thresholds": {"min_epochs": 60, "min_coverage_ratio": 0.8},
+                    "policy": {"allow_partial_failures": False},
+                    "stations": [{"station": "GOOD", "quality_status": "OK", "quality_flags": ""}],
+                    "summary": {"status": "OK", "station_count": 1, "ok_station_count": 1},
+                }
+            ),
+            encoding="utf-8",
+        )
+        args = type(
+            "Args",
+            (),
+            {
+                "workflow_summary": workflow_summary,
+                "quality_json": quality_json,
+                "db": db_path,
+                "normalized_root": normalized_root,
+                "include_warn": True,
+                "overwrite": overwrite,
+            },
+        )()
+        expected_dir = normalized_root / "us-test-event-m6-1-20200101-test-place"
+        return args, normalize.load_json(workflow_summary), normalize.load_json(quality_json), expected_dir
+
     def test_workflow_kin_files_resolves_relative_root_token_and_legacy_absolute_paths(self):
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -95,11 +200,20 @@ class NormalizePrideKinEventTest(unittest.TestCase):
                 "earthscope_subset": "usa",
             },
             1,
+            3,
             Path("workflow-summary.json"),
             normalize.event_grade([{"Azimuth_Deg": ""}]),
             True,
         )
 
+        self.assertEqual(payload["schema_version"], "normalized-event/v1")
+        self.assertEqual(payload["source"], "earthscope")
+        self.assertEqual(payload["source_label"], "EarthScope PRIDE PPP-AR kin quality-passing stations")
+        self.assertEqual(payload["event_authority"], "USGS")
+        self.assertEqual(payload["station_authority"], "EarthScope/GAGE")
+        self.assertEqual(payload["event_time"], "2020-01-01T00:00:00Z")
+        self.assertEqual(payload["station_count"], 1)
+        self.assertEqual(payload["waveform_rows"], 3)
         self.assertEqual(payload["country"], "United States")
         self.assertEqual(payload["region"], "US")
         self.assertEqual(payload["earthscope_subset"], "usa")
@@ -119,6 +233,7 @@ class NormalizePrideKinEventTest(unittest.TestCase):
                 "earthscope_subset": "nonconus",
             },
             1,
+            3,
             Path("workflow-summary.json"),
             normalize.event_grade([{"Azimuth_Deg": ""}]),
             True,
@@ -367,6 +482,75 @@ class NormalizePrideKinEventTest(unittest.TestCase):
                 waveform_rows = list(csv.DictReader(handle))
             self.assertEqual(waveform_rows[0]["Time_UTC"], "2020-01-01T00:00:00Z")
             self.assertEqual(waveform_rows[0]["Time_Offset_s"], "-0.500000")
+
+    def test_write_outputs_failure_does_not_leave_partial_event_dir(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args, summary, quality, expected_dir = self.make_write_fixture(Path(tmp), overwrite=True)
+            original = normalize.kin_to_enu
+
+            def fail_kin_to_enu(*_args, **_kwargs):
+                raise RuntimeError("synthetic normalization failure")
+
+            normalize.kin_to_enu = fail_kin_to_enu
+            try:
+                with self.assertRaises(RuntimeError):
+                    normalize.write_outputs(args, summary, quality)
+            finally:
+                normalize.kin_to_enu = original
+
+            self.assertFalse(expected_dir.exists())
+            self.assertFalse(list(args.normalized_root.glob(".tmp-*")))
+
+    def test_write_outputs_refuses_existing_package_without_overwrite(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args, summary, quality, expected_dir = self.make_write_fixture(Path(tmp), overwrite=False)
+            expected_dir.mkdir(parents=True)
+            (expected_dir / "sentinel.txt").write_text("keep\n", encoding="utf-8")
+
+            with self.assertRaises(SystemExit) as context:
+                normalize.write_outputs(args, summary, quality)
+
+            self.assertIn("already exists", str(context.exception))
+            self.assertEqual((expected_dir / "sentinel.txt").read_text(encoding="utf-8"), "keep\n")
+
+    def test_write_outputs_overwrite_replaces_existing_package(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args, summary, quality, expected_dir = self.make_write_fixture(Path(tmp), overwrite=True)
+            expected_dir.mkdir(parents=True)
+            (expected_dir / "sentinel.txt").write_text("remove\n", encoding="utf-8")
+
+            result = normalize.write_outputs(args, summary, quality)
+
+            self.assertEqual(Path(result["normalized_event_dir"]), expected_dir)
+            self.assertFalse((expected_dir / "sentinel.txt").exists())
+            self.assertTrue((expected_dir / "event.json").exists())
+
+    def test_write_outputs_writes_schema_v1_event_and_provenance(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args, summary, quality, _expected_dir = self.make_write_fixture(Path(tmp), overwrite=False)
+
+            result = normalize.write_outputs(args, summary, quality)
+            event_dir = Path(result["normalized_event_dir"])
+            event_payload = json.loads((event_dir / "event.json").read_text(encoding="utf-8"))
+            provenance = json.loads((event_dir / "provenance.json").read_text(encoding="utf-8"))
+            validation = validator.validate_export(args.normalized_root, event_id="test-event")
+
+        self.assertEqual(event_payload["schema_version"], "normalized-event/v1")
+        self.assertEqual(event_payload["event_id"], "test-event")
+        self.assertEqual(event_payload["source"], "earthscope")
+        self.assertEqual(event_payload["event_authority"], "USGS")
+        self.assertEqual(event_payload["station_authority"], "EarthScope/GAGE")
+        self.assertEqual(event_payload["event_time"], "2020-01-01T00:00:00Z")
+        self.assertEqual(event_payload["station_count"], 1)
+        self.assertEqual(event_payload["waveform_rows"], 6)
+        self.assertEqual(provenance["schema_version"], "provenance/v1")
+        self.assertEqual(provenance["source"]["name"], "earthscope")
+        self.assertEqual(provenance["source"]["event_authority"], "USGS")
+        self.assertEqual(provenance["source"]["station_authority"], "EarthScope/GAGE")
+        self.assertEqual(provenance["quality"]["thresholds"]["min_epochs"], 60)
+        self.assertEqual(provenance["quality"]["summary_status"], "OK")
+        self.assertIn("event.json", provenance["outputs"])
+        self.assertEqual(validation["status"], "OK")
 
 
 if __name__ == "__main__":

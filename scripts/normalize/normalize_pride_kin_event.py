@@ -9,8 +9,10 @@ import gzip
 import json
 import math
 import re
+import shutil
 import sqlite3
 import sys
+import tempfile
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,6 +24,12 @@ if str(QUALITY_DIR) not in sys.path:
 from compute_kin_quality import kin_to_enu, parse_utc, station_from_path
 
 ROOT = Path(__file__).resolve().parents[2]
+EVENT_SCHEMA_VERSION = "normalized-event/v1"
+PROVENANCE_SCHEMA_VERSION = "provenance/v1"
+EARTHSCOPE_SOURCE = "earthscope"
+EARTHSCOPE_SOURCE_LABEL = "EarthScope PRIDE PPP-AR kin quality-passing stations"
+EARTHSCOPE_EVENT_AUTHORITY = "USGS"
+EARTHSCOPE_STATION_AUTHORITY = "EarthScope/GAGE"
 
 
 def parse_args() -> argparse.Namespace:
@@ -31,6 +39,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--db", type=Path, required=True)
     parser.add_argument("--normalized-root", type=Path, required=True)
     parser.add_argument("--include-warn", action="store_true", help="Include WARN stations as well as OK stations.")
+    overwrite = parser.add_mutually_exclusive_group()
+    overwrite.add_argument("--overwrite", action="store_true", help="Replace an existing normalized event package.")
+    overwrite.add_argument("--no-overwrite", dest="overwrite", action="store_false", help="Refuse to replace an existing package.")
+    parser.set_defaults(overwrite=False)
     return parser.parse_args()
 
 
@@ -297,6 +309,7 @@ def earthscope_country(event: dict) -> str:
 def event_json(
     event: dict,
     station_count: int,
+    waveform_rows: int,
     workflow_summary: Path,
     grade: dict[str, object],
     include_warn: bool,
@@ -308,17 +321,25 @@ def event_json(
     country = earthscope_country(event)
     region = "Americas" if subset == "nonconus" else "US"
     return {
+        "schema_version": EVENT_SCHEMA_VERSION,
         "event": title,
         "usgs_event_id": event.get("event_id"),
         "event_id": event.get("event_id"),
+        "source": EARTHSCOPE_SOURCE,
+        "source_label": EARTHSCOPE_SOURCE_LABEL,
+        "event_authority": EARTHSCOPE_EVENT_AUTHORITY,
+        "station_authority": EARTHSCOPE_STATION_AUTHORITY,
+        "event_time": event.get("time_utc"),
         "date": event.get("time_utc"),
         "longitude": event.get("longitude"),
         "latitude": event.get("latitude"),
         "depth_km": event.get("depth_km"),
         "magnitude": event.get("magnitude"),
+        "magnitude_type": event.get("mag_type") or "",
+        "station_count": station_count,
+        "waveform_rows": waveform_rows,
         "stations": station_count,
         "country": country,
-        "source": "EarthScope PRIDE PPP-AR kin quality-passing stations",
         "data_type": "gnss_displacement_waveform",
         "paper_title": "",
         "paper_url": "",
@@ -343,6 +364,97 @@ def event_json(
     }
 
 
+def workflow_text(summary: dict, *keys: str, fallback: str = "") -> str:
+    current: object = summary
+    for key in keys:
+        if not isinstance(current, dict):
+            return fallback
+        current = current.get(key)
+    return str(current or fallback)
+
+
+def workflow_started_at(summary: dict, fallback: str) -> str:
+    for keys in [
+        ("workflow", "started_at"),
+        ("workflow_started_at",),
+        ("started_at",),
+        ("started_utc",),
+    ]:
+        value = workflow_text(summary, *keys)
+        if value:
+            return value
+    return fallback
+
+
+def provenance_payload(
+    *,
+    event_id: str,
+    summary: dict,
+    args: argparse.Namespace,
+    quality: dict,
+    station_rows: list[dict[str, object]],
+    waveform_rows: int,
+    event: dict,
+    grade: dict[str, object],
+    skipped_stations: list[dict[str, str]],
+    generated_at: str,
+    selected_kin_files: list[Path],
+) -> dict[str, object]:
+    sampling_hz = sorted({str(row["Sampling_Hz"]) for row in station_rows})
+    quality_summary = quality.get("summary", {}) if isinstance(quality.get("summary"), dict) else {}
+    thresholds = quality.get("thresholds", {}) if isinstance(quality.get("thresholds"), dict) else {}
+    workflow_script = "scripts/workflows/run_event_1hz_pride_workflow.sh"
+    return {
+        "schema_version": PROVENANCE_SCHEMA_VERSION,
+        "source_label": f"EarthScope PRIDE PPP-AR / {event_id}",
+        "data_type": "gnss_displacement_waveform",
+        "format_hint": "normalized_waveforms_csv_gz",
+        "sampling_hz": sampling_hz,
+        "notes": "Generated from PRIDE kin_* files. Events are retained when at least one quality-passing station exists; event_grade records analysis suitability.",
+        "workflow_summary": str(args.workflow_summary),
+        "quality_json": str(args.quality_json),
+        "parse_status": "normalized",
+        "station_count": len(station_rows),
+        "waveform_rows": waveform_rows,
+        "event_id": event_id,
+        "earthscope_subset": event.get("earthscope_subset") or "unknown",
+        "event_grade": grade,
+        "normalization": normalization_metadata(args.include_warn),
+        "quality_summary": quality_summary,
+        "station_quality_counts": dict(Counter(row["Quality_Status"] for row in station_rows)),
+        "skipped_stations": skipped_stations,
+        "generated_at": generated_at,
+        "workflow": {
+            "name": "earthscope-event-1hz-pride",
+            "script": workflow_script,
+            "started_at": workflow_started_at(summary, generated_at),
+            "completed_at": generated_at,
+            "git_commit": workflow_text(summary, "git_commit"),
+            "command": workflow_text(summary, "command"),
+        },
+        "source": {
+            "name": EARTHSCOPE_SOURCE,
+            "event_authority": EARTHSCOPE_EVENT_AUTHORITY,
+            "station_authority": EARTHSCOPE_STATION_AUTHORITY,
+            "downloader": "tools/earthscope_downloader/download_event_window.py",
+        },
+        "processing": {
+            "pride_processor": "tools/pride_processor/process_event_window.sh",
+            "pdp3": "pdp3",
+            "crx2rnx": "CRX2RNX",
+            "window_hours": summary.get("window_hours") or summary.get("hours_each_side"),
+            "sampling_hz": sampling_hz,
+        },
+        "quality": {
+            "quality_json": str(args.quality_json),
+            "thresholds": thresholds,
+            "summary_status": str(quality_summary.get("status") or ""),
+        },
+        "inputs": [str(path) for path in selected_kin_files],
+        "outputs": ["event.json", "stations.csv", "waveforms.csv.gz", "provenance.json"],
+    }
+
+
 def workflow_kin_files(summary: dict, workflow_summary: Path) -> list[Path]:
     kin_files = [resolve_workflow_path(path, summary, workflow_summary) for path in summary.get("files", {}).get("kin", [])]
     if kin_files:
@@ -357,6 +469,31 @@ def workflow_kin_files(summary: dict, workflow_summary: Path) -> list[Path]:
             ]
         )
     return []
+
+
+def make_staging_dir(root: Path, slug: str) -> Path:
+    root.mkdir(parents=True, exist_ok=True)
+    return Path(tempfile.mkdtemp(prefix=f".tmp-{slug}-", dir=root))
+
+
+def install_staged_package(stage_dir: Path, output_dir: Path, overwrite: bool) -> None:
+    if output_dir.exists() and not overwrite:
+        raise SystemExit(f"Normalized event package already exists: {output_dir}")
+    if not output_dir.exists():
+        stage_dir.rename(output_dir)
+        return
+
+    backup_dir = Path(tempfile.mkdtemp(prefix=f".old-{output_dir.name}-", dir=output_dir.parent))
+    backup_dir.rmdir()
+    output_dir.rename(backup_dir)
+    try:
+        stage_dir.rename(output_dir)
+    except BaseException:
+        if output_dir.exists():
+            shutil.rmtree(output_dir, ignore_errors=True)
+        backup_dir.rename(output_dir)
+        raise
+    shutil.rmtree(backup_dir, ignore_errors=True)
 
 
 def write_outputs(args: argparse.Namespace, summary: dict, quality: dict) -> dict:
@@ -386,105 +523,110 @@ def write_outputs(args: argparse.Namespace, summary: dict, quality: dict) -> dic
     if not selected:
         raise SystemExit("No kin files matched quality-passing stations")
 
-    output_dir = args.normalized_root / make_slug(event)
-    output_dir.mkdir(parents=True, exist_ok=True)
+    slug = make_slug(event)
+    output_dir = args.normalized_root / slug
+    overwrite = bool(getattr(args, "overwrite", False))
+    if output_dir.exists() and not overwrite:
+        raise SystemExit(f"Normalized event package already exists: {output_dir}")
+    stage_dir = make_staging_dir(args.normalized_root, slug)
 
     station_rows = []
     skipped_stations: list[dict[str, str]] = []
     waveform_rows = 0
-    waveforms_path = output_dir / "waveforms.csv.gz"
-    with gzip.open(waveforms_path, "wt", newline="") as handle:
-        writer = csv.DictWriter(
-            handle,
-            fieldnames=["Station", "Time_UTC", "Time_Offset_s", "Component", "Value_m", "Sampling_Hz", "Source_File"],
-            lineterminator="\n",
-        )
-        writer.writeheader()
-        for station, kin_file in selected:
-            if station not in metadata:
-                skipped_stations.append({"station": station, "reason": "missing_coordinates"})
-                continue
-            series = kin_to_enu(kin_file, event_time)
-            if not series:
-                continue
-            hz = sampling_hz(series)
-            for timestamp, seconds, east_cm, north_cm, up_cm in series:
-                time_text = timestamp.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
-                for component, value_cm in [("E", east_cm), ("N", north_cm), ("U", up_cm)]:
-                    writer.writerow(
-                        {
-                            "Station": station,
-                            "Time_UTC": time_text,
-                            "Time_Offset_s": f"{seconds:.6f}",
-                            "Component": component,
-                            "Value_m": f"{value_cm / 100.0:.9f}",
-                            "Sampling_Hz": hz,
-                            "Source_File": str(kin_file),
-                        }
-                    )
-                    waveform_rows += 1
-            station_meta = metadata[station]
-            lat = station_meta["latitude"]
-            lon = station_meta["longitude"]
-            azimuth = azimuth_deg(event.get("latitude"), event.get("longitude"), lat, lon)
-            station_rows.append(
-                {
-                    "Station": station,
-                    "Latitude": f"{lat:.8f}",
-                    "Longitude": f"{lon:.8f}",
-                    "Sampling_Hz": hz,
-                    "Waveform_Rows": len(series) * 3,
-                    "Quality_Status": quality_by_station[station].get("quality_status", ""),
-                    "Quality_Flags": quality_by_station[station].get("quality_flags", ""),
-                    "Distance_Km": "" if math.isnan(station_meta["distance_km"]) else f"{station_meta['distance_km']:.3f}",
-                    "Azimuth_Deg": "" if azimuth is None else f"{azimuth:.3f}",
-                }
+    try:
+        waveforms_path = stage_dir / "waveforms.csv.gz"
+        with gzip.open(waveforms_path, "wt", newline="") as handle:
+            writer = csv.DictWriter(
+                handle,
+                fieldnames=["Station", "Time_UTC", "Time_Offset_s", "Component", "Value_m", "Sampling_Hz", "Source_File"],
+                lineterminator="\n",
             )
+            writer.writeheader()
+            for station, kin_file in selected:
+                if station not in metadata:
+                    skipped_stations.append({"station": station, "reason": "missing_coordinates"})
+                    continue
+                series = kin_to_enu(kin_file, event_time)
+                if not series:
+                    continue
+                hz = sampling_hz(series)
+                for timestamp, seconds, east_cm, north_cm, up_cm in series:
+                    time_text = timestamp.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+                    for component, value_cm in [("E", east_cm), ("N", north_cm), ("U", up_cm)]:
+                        writer.writerow(
+                            {
+                                "Station": station,
+                                "Time_UTC": time_text,
+                                "Time_Offset_s": f"{seconds:.6f}",
+                                "Component": component,
+                                "Value_m": f"{value_cm / 100.0:.9f}",
+                                "Sampling_Hz": hz,
+                                "Source_File": str(kin_file),
+                            }
+                        )
+                        waveform_rows += 1
+                station_meta = metadata[station]
+                lat = station_meta["latitude"]
+                lon = station_meta["longitude"]
+                azimuth = azimuth_deg(event.get("latitude"), event.get("longitude"), lat, lon)
+                station_rows.append(
+                    {
+                        "Station": station,
+                        "Latitude": f"{lat:.8f}",
+                        "Longitude": f"{lon:.8f}",
+                        "Sampling_Hz": hz,
+                        "Waveform_Rows": len(series) * 3,
+                        "Quality_Status": quality_by_station[station].get("quality_status", ""),
+                        "Quality_Flags": quality_by_station[station].get("quality_flags", ""),
+                        "Distance_Km": "" if math.isnan(station_meta["distance_km"]) else f"{station_meta['distance_km']:.3f}",
+                        "Azimuth_Deg": "" if azimuth is None else f"{azimuth:.3f}",
+                    }
+                )
 
-    if not station_rows:
-        raise SystemExit("No waveform rows were normalized")
+        if not station_rows:
+            raise SystemExit("No waveform rows were normalized")
 
-    station_fieldnames = [
-        "Station",
-        "Latitude",
-        "Longitude",
-        "Sampling_Hz",
-        "Waveform_Rows",
-        "Quality_Status",
-        "Quality_Flags",
-        "Distance_Km",
-        "Azimuth_Deg",
-    ]
-    with (output_dir / "stations.csv").open("w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=station_fieldnames, lineterminator="\n")
-        writer.writeheader()
-        writer.writerows(sorted(station_rows, key=lambda row: row["Station"]))
+        station_fieldnames = [
+            "Station",
+            "Latitude",
+            "Longitude",
+            "Sampling_Hz",
+            "Waveform_Rows",
+            "Quality_Status",
+            "Quality_Flags",
+            "Distance_Km",
+            "Azimuth_Deg",
+        ]
+        with (stage_dir / "stations.csv").open("w", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=station_fieldnames, lineterminator="\n")
+            writer.writeheader()
+            writer.writerows(sorted(station_rows, key=lambda row: row["Station"]))
 
-    grade = event_grade(station_rows)
-    event_payload = event_json(event, len(station_rows), args.workflow_summary, grade, args.include_warn, skipped_stations)
-    (output_dir / "event.json").write_text(json.dumps(event_payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        grade = event_grade(station_rows)
+        event_payload = event_json(event, len(station_rows), waveform_rows, args.workflow_summary, grade, args.include_warn, skipped_stations)
+        (stage_dir / "event.json").write_text(json.dumps(event_payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
-    provenance = {
-        "source_label": f"EarthScope PRIDE PPP-AR / {event_id}",
-        "data_type": "gnss_displacement_waveform",
-        "format_hint": "normalized_waveforms_csv_gz",
-        "sampling_hz": sorted({row["Sampling_Hz"] for row in station_rows}),
-        "notes": "Generated from PRIDE kin_* files. Events are retained when at least one quality-passing station exists; event_grade records analysis suitability.",
-        "workflow_summary": str(args.workflow_summary),
-        "quality_json": str(args.quality_json),
-        "parse_status": "normalized",
-        "station_count": len(station_rows),
-        "waveform_rows": waveform_rows,
-        "event_id": event_id,
-        "earthscope_subset": event.get("earthscope_subset") or "unknown",
-        "event_grade": grade,
-        "normalization": normalization_metadata(args.include_warn),
-        "quality_summary": quality.get("summary", {}),
-        "station_quality_counts": dict(Counter(row["Quality_Status"] for row in station_rows)),
-        "skipped_stations": skipped_stations,
-        "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-    }
-    (output_dir / "provenance.json").write_text(json.dumps(provenance, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        generated_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        provenance = provenance_payload(
+            event_id=event_id,
+            summary=summary,
+            args=args,
+            quality=quality,
+            station_rows=station_rows,
+            waveform_rows=waveform_rows,
+            event=event,
+            grade=grade,
+            skipped_stations=skipped_stations,
+            generated_at=generated_at,
+            selected_kin_files=[path for _, path in selected],
+        )
+        (stage_dir / "provenance.json").write_text(json.dumps(provenance, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+        install_staged_package(stage_dir, output_dir, overwrite)
+    except BaseException:
+        if stage_dir.exists():
+            shutil.rmtree(stage_dir, ignore_errors=True)
+        raise
 
     return {
         "normalized_status": "OK",

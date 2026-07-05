@@ -60,6 +60,7 @@ PRIDE_PROCESSOR="${PIPELINE_ROOT}/tools/pride_processor/process_event_window.sh"
 PRIDE_CLEANER="${PIPELINE_ROOT}/tools/pride_processor/cleanup_pride_workdir.sh"
 QUALITY_SCRIPT="${PIPELINE_ROOT}/scripts/quality/compute_kin_quality.py"
 NORMALIZER="${PIPELINE_ROOT}/scripts/normalize/normalize_pride_kin_event.py"
+VALIDATOR="${PIPELINE_ROOT}/scripts/summaries/validate_normalized_export.py"
 PROXY_ENV_VARS=(http_proxy https_proxy all_proxy HTTP_PROXY HTTPS_PROXY ALL_PROXY)
 
 for proxy_var in "${PROXY_ENV_VARS[@]}"; do
@@ -443,6 +444,8 @@ if [[ "$DRY_RUN" == "1" ]]; then
     "$QUALITY_SCRIPT" "$EVENT_TIME_UTC" "$HOURS" "${REPORT_DIR}/kin-quality.tsv" "${REPORT_DIR}/kin-quality.json" '<kin-files-from-manifest>'
   printf '  python3 %q --workflow-summary %q --quality-json %q --db %q --normalized-root %q --include-warn\n' \
     "$NORMALIZER" "${REPORT_DIR}/workflow-summary.json" "${REPORT_DIR}/kin-quality.json" "$NORMALIZE_DB" "${PIPELINE_ROOT}/exports/normalized-ok-stations-us-nz"
+  printf '  python3 %q --root %q --event-id %q --json-out %q\n' \
+    "$VALIDATOR" "${PIPELINE_ROOT}/exports/normalized-ok-stations-us-nz" "$EVENT_ID" "${REPORT_DIR}/normalized-export-validation.json"
   if [[ "$SKIP_PLOT" == "0" ]]; then
     printf '  final normalized figures from %q after normalization\n' "${PIPELINE_ROOT}/scripts/plotting/plot_completed_normalized_event.py"
   fi
@@ -850,6 +853,10 @@ normalized_waveform_rows="0"
 normalized_event_grade=""
 normalized_azimuth_bins_covered="0"
 FINAL_NORMALIZED_ROOT="${FINAL_NORMALIZED_ROOT:-${PIPELINE_ROOT}/exports/normalized-ok-stations-us-nz}"
+NORMALIZED_VALIDATION_JSON="${REPORT_DIR}/normalized-export-validation.json"
+normalized_validation_status="SKIPPED"
+normalized_export_valid="false"
+normalized_validation_errors=""
 usable_kin="0"
 if (( kin_count > 0 )) && [[ "$quality_status" != "FAIL" && "$quality_status" != "SKIPPED_NO_KIN" ]]; then
   usable_kin="1"
@@ -913,6 +920,33 @@ payload = json.loads(Path(sys.argv[1]).read_text())
 print(payload.get("azimuth_bins_covered", 0))
 PY
 )"
+    echo "Validating normalized export package..."
+    if python3 "$VALIDATOR" \
+        --root "$FINAL_NORMALIZED_ROOT" \
+        --event-id "$EVENT_ID" \
+        --json-out "$NORMALIZED_VALIDATION_JSON" \
+        > "${LOG_DIR}/normalized-export-validation.log" 2>&1; then
+      normalized_validation_status="OK"
+      normalized_export_valid="true"
+    else
+      normalized_validation_status="FAIL"
+      normalized_export_valid="false"
+      echo "Normalized export validation failed. See ${LOG_DIR}/normalized-export-validation.log" >&2
+    fi
+    normalized_validation_errors="$(python3 - "$NORMALIZED_VALIDATION_JSON" <<'PY'
+import json
+import sys
+from pathlib import Path
+path = Path(sys.argv[1])
+if not path.exists():
+    print("")
+else:
+    try:
+        print(json.loads(path.read_text()).get("error_count", ""))
+    except json.JSONDecodeError:
+        print("")
+PY
+)"
   else
     normalized_status="FAIL"
     echo "Normalizing PRIDE kin results failed. See ${LOG_DIR}/normalize-pride-kin.log" >&2
@@ -950,6 +984,10 @@ duration_seconds=$((workflow_end_epoch - workflow_start_epoch))
   printf 'normalized_waveform_rows\t%s\n' "$normalized_waveform_rows"
   printf 'normalized_event_grade\t%s\n' "$normalized_event_grade"
   printf 'normalized_azimuth_bins_covered\t%s\n' "$normalized_azimuth_bins_covered"
+  printf 'normalized_validation_status\t%s\n' "$normalized_validation_status"
+  printf 'normalized_export_valid\t%s\n' "$normalized_export_valid"
+  printf 'normalized_validation_errors\t%s\n' "$normalized_validation_errors"
+  printf 'normalized_validation_json\t%s\n' "$(portable_path "$NORMALIZED_VALIDATION_JSON")"
   printf 'workflow_dir\t%s\n' "$(portable_path "$WORKFLOW_DIR")"
   printf 'download_dir\t%s\n' "$(portable_path "$DOWNLOAD_DIR")"
   printf 'obs_dir\t%s\n' "$(portable_path "$OBS_DIR")"
@@ -960,7 +998,7 @@ duration_seconds=$((workflow_end_epoch - workflow_start_epoch))
 } > "${REPORT_DIR}/workflow-summary.tsv"
 
 WORKFLOW_JSON="${REPORT_DIR}/workflow-summary.json"
-export EVENT_ID EVENT_TIME_UTC YEAR DOY HOURS INTERVAL PROCESS_JOBS download_status process_status plot_status quality_status obs_validation_status cleanup_status pride_cleanup_status obs_cleanup_status normalized_status normalized_event_dir normalized_station_count normalized_waveform_rows normalized_event_grade normalized_azimuth_bins_covered duration_seconds
+export EVENT_ID EVENT_TIME_UTC YEAR DOY HOURS INTERVAL PROCESS_JOBS download_status process_status plot_status quality_status obs_validation_status cleanup_status pride_cleanup_status obs_cleanup_status normalized_status normalized_event_dir normalized_station_count normalized_waveform_rows normalized_event_grade normalized_azimuth_bins_covered normalized_validation_status normalized_export_valid normalized_validation_errors duration_seconds
 export WORKFLOW_DIR DOWNLOAD_DIR OBS_DIR PRIDE_RUN_ROOT LOG_DIR MANIFEST_DIR REPORT_DIR latest_pride_summary
 export PIPELINE_ROOT
 export OBS_VALIDATION_FILE="${MANIFEST_DIR}/obs-validation.tsv"
@@ -969,6 +1007,7 @@ export KIN_FILES_FILE="${MANIFEST_DIR}/kin-files.txt"
 export PLOT_FILES_FILE="${MANIFEST_DIR}/plot-files.txt"
 export PRIDE_SUMMARY_FILE="$latest_pride_summary"
 export KIN_QUALITY_TSV KIN_QUALITY_JSON
+export NORMALIZED_VALIDATION_JSON
 export REQUESTED_STATION_COUNT="${#STATIONS[@]}"
 export OBS_COUNT="$obs_count"
 export KIN_COUNT="$kin_count"
@@ -1082,6 +1121,8 @@ summary = {
         "pride_cleanup": os.environ["pride_cleanup_status"],
         "obs_cleanup": os.environ["obs_cleanup_status"],
         "normalized": os.environ["normalized_status"],
+        "normalized_validation": os.environ["normalized_validation_status"],
+        "normalized_export_valid": os.environ["normalized_export_valid"] == "true",
     },
     "counts": {
         "requested_stations": as_int(os.environ["REQUESTED_STATION_COUNT"]),
@@ -1091,6 +1132,7 @@ summary = {
         "normalized_stations": as_int(os.environ["normalized_station_count"]),
         "normalized_waveform_rows": as_int(os.environ["normalized_waveform_rows"]),
         "normalized_azimuth_bins_covered": as_int(os.environ["normalized_azimuth_bins_covered"]),
+        "normalized_validation_errors": as_int(os.environ["normalized_validation_errors"]),
     },
     "duration_seconds": as_int(os.environ["duration_seconds"]),
     "paths": {
@@ -1107,6 +1149,7 @@ summary = {
         "pride_summary": portable(os.environ.get("latest_pride_summary", "")),
         "normalized_event_dir": portable(os.environ["normalized_event_dir"]),
         "normalized_event_grade": os.environ["normalized_event_grade"],
+        "normalized_validation_json": portable(os.environ.get("NORMALIZED_VALIDATION_JSON", "")),
     },
     "obs_validation": read_tsv_dicts(os.environ.get("OBS_VALIDATION_FILE")),
     "pride_stations": read_pride_summary(os.environ.get("PRIDE_SUMMARY_FILE")),
@@ -1138,6 +1181,9 @@ PY
   printf '%s\n' "- Normalized waveform rows: \`${normalized_waveform_rows}\`"
   printf '%s\n' "- Normalized event grade: \`${normalized_event_grade}\`"
   printf '%s\n' "- Normalized azimuth bins covered: \`${normalized_azimuth_bins_covered}\`"
+  printf '%s\n' "- Normalized validation: \`${normalized_validation_status}\`"
+  printf '%s\n' "- Normalized export valid: \`${normalized_export_valid}\`"
+  printf '%s\n' "- Normalized validation errors: \`${normalized_validation_errors}\`"
   printf '%s\n' "- Obs cleanup status: \`${obs_cleanup_status}\`"
   printf '%s\n' "- Duration seconds: \`${duration_seconds}\`"
   printf '%s\n' "- Requested stations: \`${#STATIONS[@]}\`"
@@ -1152,6 +1198,7 @@ PY
   printf '%s\n' "- Logs: \`$(portable_path "$LOG_DIR")\`"
   printf '%s\n' "- Manifests: \`$(portable_path "$MANIFEST_DIR")\`"
   printf '%s\n' "- Normalized event: \`$(portable_path "$normalized_event_dir")\`"
+  printf '%s\n' "- Normalized validation JSON: \`$(portable_path "$NORMALIZED_VALIDATION_JSON")\`"
   printf '%s\n' "- Kin quality TSV: \`$(portable_path "$KIN_QUALITY_TSV")\`"
   printf '%s\n' "- Kin quality JSON: \`$(portable_path "$KIN_QUALITY_JSON")\`"
   printf '%s\n' "- Reports: \`$(portable_path "$REPORT_DIR")\`"
@@ -1167,7 +1214,7 @@ echo "JSON summary: ${WORKFLOW_JSON}"
 echo "Machine-readable summary: ${REPORT_DIR}/workflow-summary.tsv"
 
 final_plot_status="SKIPPED"
-if [[ "$SKIP_PLOT" == "0" && "$usable_kin" == "1" && "$normalized_status" == "OK" ]]; then
+if [[ "$SKIP_PLOT" == "0" && "$usable_kin" == "1" && "$normalized_status" == "OK" && "$normalized_validation_status" == "OK" ]]; then
   echo
   echo "Running final normalized plot stage..."
   FINAL_NORMALIZED_ROOT="${FINAL_NORMALIZED_ROOT:-${PIPELINE_ROOT}/exports/normalized-ok-stations-us-nz}"
@@ -1193,6 +1240,12 @@ if [[ "$SKIP_PLOT" == "0" && "$usable_kin" == "1" && "$normalized_status" == "OK
     --plot-files "${MANIFEST_DIR}/plot-files.txt"
 fi
 
-if [[ "$usable_kin" != "1" || "$pride_cleanup_status" == "FAIL" || "$obs_cleanup_status" == "FAIL" || "$normalized_status" == "FAIL" || "$final_plot_status" == "FAIL" ]]; then
+python3 "${PIPELINE_ROOT}/scripts/workflows/update_workflow_summary_status.py" \
+  --summary-json "$WORKFLOW_JSON" \
+  --summary-tsv "${REPORT_DIR}/workflow-summary.tsv" \
+  --summary-md "${REPORT_DIR}/workflow-summary.md" \
+  --derive-failure
+
+if [[ "$usable_kin" != "1" || "$pride_cleanup_status" == "FAIL" || "$obs_cleanup_status" == "FAIL" || "$normalized_status" == "FAIL" || "$normalized_validation_status" == "FAIL" || "$final_plot_status" == "FAIL" ]]; then
   exit 1
 fi

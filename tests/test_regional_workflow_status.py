@@ -16,13 +16,23 @@ class RegionalWorkflowStatusTest(unittest.TestCase):
         with path.open(newline="", encoding="utf-8") as handle:
             return {row["key"]: row["value"] for row in csv.DictReader(handle, delimiter="\t")}
 
-    def test_regional_workflows_block_final_plot_when_normalization_is_unsupported(self):
-        scripts = [
-            ROOT / "scripts" / "workflows" / "run_geonet_event_1hz_pride_workflow.sh",
-            ROOT / "scripts" / "workflows" / "run_ring_event_1hz_pride_workflow.sh",
+    def test_regional_workflows_block_final_plot_without_normalized_output(self):
+        cases = [
+            (
+                ROOT / "scripts" / "workflows" / "run_geonet_event_1hz_pride_workflow.sh",
+                ["--skip-normalize"],
+                "SKIPPED_NORMALIZE",
+                "BLOCKED_NORMALIZE_SKIPPED",
+            ),
+            (
+                ROOT / "scripts" / "workflows" / "run_ring_event_1hz_pride_workflow.sh",
+                [],
+                "SKIPPED_UNSUPPORTED_SOURCE",
+                "BLOCKED_NORMALIZE_UNSUPPORTED",
+            ),
         ]
 
-        for script in scripts:
+        for script, extra_args, expected_normalized, expected_plot in cases:
             with self.subTest(script=script.name):
                 with tempfile.TemporaryDirectory(dir=ROOT) as tmp:
                     tmp_path = Path(tmp)
@@ -58,6 +68,7 @@ class RegionalWorkflowStatusTest(unittest.TestCase):
                             str(obs_root),
                             "--skip-download",
                             "--skip-process",
+                            *extra_args,
                         ],
                         cwd=str(ROOT),
                         env=env,
@@ -72,8 +83,8 @@ class RegionalWorkflowStatusTest(unittest.TestCase):
 
                     self.assertEqual(result.returncode, 0, result.stderr)
                     self.assertFalse(plot_marker.exists(), f"{script.name} unexpectedly called final plotter")
-                    self.assertEqual(values["normalized_status"], "SKIPPED_UNSUPPORTED_SOURCE")
-                    self.assertEqual(values["plot_status"], "BLOCKED_NORMALIZE_UNSUPPORTED")
+                    self.assertEqual(values["normalized_status"], expected_normalized)
+                    self.assertEqual(values["plot_status"], expected_plot)
 
 
 if __name__ == "__main__":

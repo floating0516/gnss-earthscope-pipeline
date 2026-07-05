@@ -14,11 +14,14 @@ ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS = ROOT / "scripts"
 TOOLS = ROOT / "tools"
 DOWNLOADER_TOOLS = TOOLS / "earthscope_downloader"
+GEONET_TOOLS = TOOLS / "geonet_downloader"
 PRIDE_TOOLS = TOOLS / "pride_processor"
 DEFAULT_DB = ROOT / "data" / "earthscope_availability" / "earthscope_1hz.sqlite"
+DEFAULT_GEONET_DB = ROOT / "data" / "geonet" / "geonet_m6plus.sqlite"
 EARTHSCOPE_METADATA_URL = "https://web-services.unavco.org/backoffice-geoserver-test/gnss/ows"
 PROXY_ENV_VARS = ("http_proxy", "https_proxy", "all_proxy", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY")
 REQUIRED_COMMANDS = ("bash", "python3", "timeout", "curl", "jq", "grep", "gunzip", "CRX2RNX", "pdp3", "es")
+GEONET_REQUIRED_COMMANDS = ("bash", "python3", "timeout", "grep", "gunzip", "CRX2RNX", "pdp3")
 REQUIRED_SCRIPTS = (
     ("run-batch script", SCRIPTS / "workflows" / "run_event_batch_workflow.sh"),
     ("run-event script", SCRIPTS / "workflows" / "run_event_1hz_pride_workflow.sh"),
@@ -30,6 +33,18 @@ REQUIRED_SCRIPTS = (
     ("PRIDE cleaner script", PRIDE_TOOLS / "cleanup_pride_workdir.sh"),
     ("quality script", SCRIPTS / "quality" / "compute_kin_quality.py"),
     ("normalizer script", SCRIPTS / "normalize" / "normalize_pride_kin_event.py"),
+    ("final plotter script", SCRIPTS / "plotting" / "plot_completed_normalized_event.py"),
+)
+GEONET_REQUIRED_SCRIPTS = (
+    ("GeoNet run-batch script", SCRIPTS / "workflows" / "run_geonet_batch_workflow.sh"),
+    ("GeoNet run-event script", SCRIPTS / "workflows" / "run_geonet_event_1hz_pride_workflow.sh"),
+    ("summary updater script", SCRIPTS / "workflows" / "update_workflow_summary_status.py"),
+    ("GeoNet rolling downloader script", GEONET_TOOLS / "fetch_geonet_1hz.py"),
+    ("GeoNet event high-rate downloader script", GEONET_TOOLS / "fetch_geonet_event_highrate.py"),
+    ("GeoNet station selector script", GEONET_TOOLS / "select_geonet_stations.py"),
+    ("PRIDE processor script", PRIDE_TOOLS / "process_event_window.sh"),
+    ("PRIDE cleaner script", PRIDE_TOOLS / "cleanup_pride_workdir.sh"),
+    ("quality script", SCRIPTS / "quality" / "compute_kin_quality.py"),
     ("final plotter script", SCRIPTS / "plotting" / "plot_completed_normalized_event.py"),
 )
 
@@ -76,19 +91,19 @@ def resolve_path(value: str | Path) -> Path:
     return (Path.cwd() / path).resolve(strict=False)
 
 
-def command_checks(env: dict[str, str]) -> list[CheckResult]:
+def command_checks(env: dict[str, str], commands: tuple[str, ...] = REQUIRED_COMMANDS) -> list[CheckResult]:
     results = []
     path = env.get("PATH")
-    for command in REQUIRED_COMMANDS:
+    for command in commands:
         resolved = shutil.which(command, path=path)
         status = "OK" if resolved else "MISSING"
         results.append(CheckResult(status, f"command {command}", resolved or ""))
     return results
 
 
-def script_checks() -> list[CheckResult]:
+def script_checks(scripts: tuple[tuple[str, Path], ...] = REQUIRED_SCRIPTS) -> list[CheckResult]:
     results = []
-    for name, path in REQUIRED_SCRIPTS:
+    for name, path in scripts:
         if path.suffix == ".py" and path.is_file():
             results.append(CheckResult("OK", name, str(path)))
         elif path.is_file() and os.access(path, os.X_OK):
@@ -213,8 +228,8 @@ def run_preflight(
 ) -> tuple[list[CheckResult], int]:
     env = effective_env(environ, strip_proxy=True)
     results = [proxy_info(environ)]
-    results.extend(command_checks(env))
-    results.extend(script_checks())
+    results.extend(command_checks(env, REQUIRED_COMMANDS))
+    results.extend(script_checks(REQUIRED_SCRIPTS))
     if include_database:
         results.extend(database_checks(db, verified_files_db))
     auth_result, token = earthscope_auth_check(env, timeout)
@@ -229,6 +244,28 @@ def run_preflight(
     return results, 0
 
 
+def run_geonet_preflight(
+    *,
+    db: str | Path | None = None,
+    timeout: float = 30.0,
+    include_database: bool = True,
+    environ: dict[str, str] | None = None,
+) -> tuple[list[CheckResult], int]:
+    _ = timeout  # Reserved for future GeoNet connectivity checks.
+    env = effective_env(environ, strip_proxy=True)
+    results = [proxy_info(environ)]
+    results.extend(command_checks(env, GEONET_REQUIRED_COMMANDS))
+    results.extend(script_checks(GEONET_REQUIRED_SCRIPTS))
+    if include_database:
+        results.extend(database_checks(db or DEFAULT_GEONET_DB))
+    failed = sum(1 for result in results if result.failed)
+    if failed:
+        results.append(CheckResult("PREFLIGHT_FAILED", "GeoNet preflight", f"{failed} blocking check(s); batch not started", fatal=False))
+        return results, 2
+    results.append(CheckResult("PREFLIGHT_OK", "GeoNet preflight", "all blocking checks passed", fatal=False))
+    return results, 0
+
+
 def write_tsv(results: list[CheckResult], output=None) -> None:
     if output is None:
         output = sys.stdout
@@ -236,15 +273,20 @@ def write_tsv(results: list[CheckResult], output=None) -> None:
         print(f"{result.status}\t{result.name}\t{result.detail}", file=output)
 
 
-def write_json(results: list[CheckResult], exit_code: int, output=None) -> None:
-    if output is None:
-        output = sys.stdout
+def write_json(results: list[CheckResult], exit_code: int, output=None, path: Path | None = None) -> None:
     payload = {
         "ok": exit_code == 0,
         "exit_code": exit_code,
         "checks": [asdict(result) for result in results],
     }
-    print(json.dumps(payload, ensure_ascii=False, indent=2), file=output)
+    text = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
+    if path is not None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        return
+    if output is None:
+        output = sys.stdout
+    print(text, file=output, end="")
 
 
 def build_parser() -> argparse.ArgumentParser:

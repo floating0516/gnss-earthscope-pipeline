@@ -37,7 +37,7 @@ GPS_UTC_OFFSETS = (
 )
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--event-time", required=True, help="UTC event time, e.g. 2021-10-11T09:10:25Z")
     parser.add_argument("--expected-hours-each-side", type=float, default=0.0)
@@ -66,7 +66,7 @@ def parse_args() -> argparse.Namespace:
         help="Report WARN instead of FAIL when at least one station is usable and only some stations fail.",
     )
     parser.add_argument("kin_files", nargs="*", help="PRIDE kin_* files")
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 def parse_utc(value: str) -> dt.datetime:
@@ -315,7 +315,11 @@ def summarize_file(path: Path, event_time: dt.datetime, args: argparse.Namespace
     }
 
 
-def aggregate(rows: list[dict[str, str]], min_station_health_ratio: float = 0.80) -> dict[str, object]:
+def aggregate(
+    rows: list[dict[str, str]],
+    min_station_health_ratio: float = 0.80,
+    allow_partial_failures: bool = False,
+) -> dict[str, object]:
     counts = {"OK": 0, "WARN": 0, "FAIL": 0}
     for row in rows:
         status = row.get("quality_status", "")
@@ -324,7 +328,12 @@ def aggregate(rows: list[dict[str, str]], min_station_health_ratio: float = 0.80
 
     station_count = len(rows)
     station_health_ratio = counts["OK"] / station_count if station_count else 0.0
+    usable_count = counts["OK"] + counts["WARN"]
     if not rows:
+        status = "FAIL"
+    elif counts["FAIL"] and station_health_ratio < min_station_health_ratio and not allow_partial_failures:
+        status = "FAIL"
+    elif usable_count == 0:
         status = "FAIL"
     elif station_health_ratio < min_station_health_ratio:
         status = "WARN"
@@ -339,15 +348,39 @@ def aggregate(rows: list[dict[str, str]], min_station_health_ratio: float = 0.80
         "fail_station_count": counts["FAIL"],
         "station_health_ratio": round(station_health_ratio, 3),
         "min_station_health_ratio": min_station_health_ratio,
+        "allow_partial_failures": allow_partial_failures,
     }
 
 
-def main() -> int:
-    args = parse_args()
+def thresholds_payload(args: argparse.Namespace) -> dict[str, object]:
+    return {
+        "min_epochs": args.min_epochs,
+        "min_coverage_ratio": args.min_coverage_ratio,
+        "min_station_health_ratio": args.min_station_health_ratio,
+        "max_pre_rms_cm": args.max_pre_rms_cm,
+        "max_epoch_jump_cm": args.max_epoch_jump_cm,
+        "event_step_window": args.event_step_window,
+        "expected_hours_each_side": args.expected_hours_each_side,
+        "expected_seconds": args.expected_seconds,
+    }
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
     event_time = parse_utc(args.event_time)
     rows = [summarize_file(Path(path), event_time, args) for path in args.kin_files]
-    summary = aggregate(rows, min_station_health_ratio=args.min_station_health_ratio)
-    payload = {"summary": summary, "stations": rows}
+    summary = aggregate(
+        rows,
+        min_station_health_ratio=args.min_station_health_ratio,
+        allow_partial_failures=args.allow_partial_failures,
+    )
+    payload = {
+        "schema_version": "kin-quality/v1",
+        "thresholds": thresholds_payload(args),
+        "policy": {"allow_partial_failures": args.allow_partial_failures},
+        "summary": summary,
+        "stations": rows,
+    }
 
     if args.out_tsv:
         out_tsv = Path(args.out_tsv)

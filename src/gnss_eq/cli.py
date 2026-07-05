@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import importlib.util
 import json
 import os
 import shutil
@@ -25,6 +26,7 @@ PRIDE_TOOLS = TOOLS / "pride_processor"
 EARTHSCOPE_METADATA_URL = "https://web-services.unavco.org/backoffice-geoserver-test/gnss/ows"
 DEFAULT_AVAILABILITY_DB = ROOT / "data" / "earthscope_availability" / "earthscope_1hz.sqlite"
 PROXY_ENV_KEYS = ("http_proxy", "https_proxy", "all_proxy", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY")
+CLASSIFY_BATCH_STATUS = SCRIPTS / "workflows" / "classify_batch_status.py"
 
 
 def absolute_path(value: str) -> str:
@@ -52,6 +54,14 @@ def shlex_quote(value: str) -> str:
     import shlex
 
     return shlex.quote(value)
+
+
+def load_script_module(path: Path, module_name: str) -> object:
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
 
 
 def positive_int(value: str) -> int:
@@ -186,6 +196,80 @@ def cmd_run_batch(args: argparse.Namespace) -> int:
     if not args.cleanup_obs:
         cmd.append("--no-cleanup-obs")
     return run_command(cmd)
+
+
+def worklist_status(row: dict[str, str]) -> str:
+    final_status = (row.get("final_status") or "").strip().upper()
+    latest_workflow = (row.get("latest_workflow") or "").strip()
+    batch_status = (row.get("status") or "").strip().upper()
+    stations = (row.get("stations") or "").strip()
+
+    if final_status in {"OK", "SKIPPED_EXISTING"}:
+        return "DONE"
+    if final_status.startswith("RETRY_"):
+        return "READY_TO_RETRY"
+    if final_status == "UNKNOWN_REVIEW" and not latest_workflow and stations and batch_status in {"", "PENDING", "READY", "TODO"}:
+        return "READY_TO_RUN"
+    return "NEEDS_REVIEW"
+
+
+def prepare_worklist_rows(rows: list[dict[str, str]]) -> list[dict[str, str]]:
+    prepared = []
+    for row in rows:
+        item = dict(row)
+        status = worklist_status(item)
+        item["worklist_status"] = status
+        if status == "READY_TO_RUN":
+            item["failure_class"] = ""
+            item["next_action"] = "RUN_WORKFLOW"
+        prepared.append(item)
+    return prepared
+
+
+def worklist_fieldnames(input_fieldnames: list[str]) -> list[str]:
+    fields = list(input_fieldnames)
+    for field in ["worklist_status", "final_status", "failure_class", "next_action", "latest_workflow"]:
+        if field not in fields:
+            fields.append(field)
+    return fields
+
+
+def write_worklist_tsv(rows: list[dict[str, str]], fieldnames: list[str], output: Path | None) -> None:
+    handle = None
+    try:
+        if output is None:
+            handle = sys.stdout
+        else:
+            output.parent.mkdir(parents=True, exist_ok=True)
+            handle = output.open("w", newline="", encoding="utf-8")
+        writer = csv.DictWriter(handle, fieldnames=fieldnames, delimiter="\t", lineterminator="\n")
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({field: row.get(field, "") for field in fieldnames})
+    finally:
+        if handle is not None and handle is not sys.stdout:
+            handle.close()
+
+
+def cmd_worklist(args: argparse.Namespace) -> int:
+    classifier = load_script_module(CLASSIFY_BATCH_STATUS, "classify_batch_status")
+    rows = classifier.classify_batch(Path(args.batch), Path(args.runs), Path(args.export_root))
+    rows = prepare_worklist_rows(rows)
+    with Path(args.batch).open(newline="", encoding="utf-8") as handle:
+        input_fieldnames = csv.DictReader(handle).fieldnames or []
+    fieldnames = worklist_fieldnames(input_fieldnames)
+
+    output = Path(args.out) if args.out else None
+    if args.format == "json":
+        payload = json.dumps(rows, indent=2, ensure_ascii=False) + "\n"
+        if output is None:
+            print(payload, end="")
+        else:
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_text(payload, encoding="utf-8")
+    else:
+        write_worklist_tsv(rows, fieldnames, output)
+    return 0
 
 
 def cmd_quality(args: argparse.Namespace) -> int:
@@ -1008,11 +1092,30 @@ def cmd_preflight_earthscope(args: argparse.Namespace) -> int:
         include_connectivity=not args.no_connectivity,
         include_database=not args.no_database,
     )
+    write_preflight_report(args, results, exit_code)
+    return exit_code
+
+
+def cmd_preflight_geonet(args: argparse.Namespace) -> int:
+    results, exit_code = preflight.run_geonet_preflight(
+        db=args.db,
+        timeout=args.timeout,
+        include_database=not args.no_database,
+    )
+    write_preflight_report(args, results, exit_code)
+    return exit_code
+
+
+def write_preflight_report(args: argparse.Namespace, results: list[preflight.CheckResult], exit_code: int) -> None:
+    json_out_value = getattr(args, "json_out", None)
+    json_out = Path(json_out_value) if isinstance(json_out_value, (str, os.PathLike)) and json_out_value else None
+    if json_out is not None:
+        preflight.write_json(results, exit_code, path=json_out)
     if args.format == "json":
-        preflight.write_json(results, exit_code)
+        if json_out is None:
+            preflight.write_json(results, exit_code)
     else:
         preflight.write_tsv(results)
-    return exit_code
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1040,6 +1143,14 @@ def build_parser() -> argparse.ArgumentParser:
     run_batch.add_argument("--no-allow-partial", action="store_true")
     add_common_workflow_flags(run_batch)
     run_batch.set_defaults(func=cmd_run_batch)
+
+    worklist = sub.add_parser("worklist", help="Classify batch rows into ready, retry, review, and done worklists.")
+    worklist.add_argument("--batch", required=True, help="Input batch CSV.")
+    worklist.add_argument("--runs", default=str(ROOT / "runs"), help="Workflow runs root.")
+    worklist.add_argument("--export-root", default=str(ROOT / "exports" / "normalized-ok-stations-us-nz"), help="Normalized export root.")
+    worklist.add_argument("--format", choices=["tsv", "json"], default="tsv")
+    worklist.add_argument("--out", help="Optional output path. Defaults to stdout.")
+    worklist.set_defaults(func=cmd_worklist)
 
     quality = sub.add_parser("quality", help="Compute epoch coverage, ENU RMS, and jump metrics from kin_* files.")
     quality.add_argument("--event-time", required=True)
@@ -1133,9 +1244,18 @@ def build_parser() -> argparse.ArgumentParser:
     preflight_cmd.add_argument("--verified-files-db", default="", help="Optional verified-files database path.")
     preflight_cmd.add_argument("--timeout", type=float, default=30.0, help="Per-check timeout in seconds.")
     preflight_cmd.add_argument("--format", choices=["tsv", "json"], default="tsv")
+    preflight_cmd.add_argument("--json-out", help="Optional path for a machine-readable JSON report.")
     preflight_cmd.add_argument("--no-connectivity", action="store_true", help="Skip authenticated EarthScope curl connectivity check.")
     preflight_cmd.add_argument("--no-database", action="store_true", help="Skip database path checks.")
     preflight_cmd.set_defaults(func=cmd_preflight_earthscope)
+
+    geonet_preflight_cmd = sub.add_parser("preflight-geonet", help="Run blocking GeoNet workflow readiness checks.")
+    geonet_preflight_cmd.add_argument("--db", default=str(preflight.DEFAULT_GEONET_DB), help="GeoNet availability database path.")
+    geonet_preflight_cmd.add_argument("--timeout", type=float, default=30.0, help="Reserved per-check timeout in seconds.")
+    geonet_preflight_cmd.add_argument("--format", choices=["tsv", "json"], default="tsv")
+    geonet_preflight_cmd.add_argument("--json-out", help="Optional path for a machine-readable JSON report.")
+    geonet_preflight_cmd.add_argument("--no-database", action="store_true", help="Skip database path checks.")
+    geonet_preflight_cmd.set_defaults(func=cmd_preflight_geonet)
 
     monitor_cmd = sub.add_parser("monitor", help="Read-only status report for EarthScope and GeoNet workflow candidates.")
     monitor_cmd.add_argument("--format", choices=["tsv", "json"], default="tsv")

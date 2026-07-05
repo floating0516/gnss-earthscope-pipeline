@@ -111,6 +111,63 @@ class WorkflowSummaryStatusTest(unittest.TestCase):
                 "/tmp/repo/figure/event-map.png\nfigure/event-record.png\n",
             )
 
+    def test_derives_failure_reason_in_all_summary_formats(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            report_dir = root / "runs" / "event-a" / "workflow-20200101T000000Z" / "reports"
+            report_dir.mkdir(parents=True)
+
+            summary_json = report_dir / "workflow-summary.json"
+            summary_tsv = report_dir / "workflow-summary.tsv"
+            summary_md = report_dir / "workflow-summary.md"
+
+            summary_json.write_text(
+                json.dumps(
+                    {
+                        "status": {
+                            "download": "OK",
+                            "obs_validation": "OK",
+                            "process": "FAIL",
+                            "quality": "SKIPPED",
+                            "normalized": "SKIPPED_NO_KIN",
+                            "plot": "SKIPPED",
+                        },
+                        "counts": {"obs_files": 1, "kin_files": 0},
+                    },
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            summary_tsv.write_text("key\tvalue\nprocess_status\tFAIL\nkin_file_count\t0\n", encoding="utf-8")
+            summary_md.write_text("- PRIDE status: `FAIL`\n", encoding="utf-8")
+
+            rc = updater.main(
+                [
+                    "--summary-json",
+                    str(summary_json),
+                    "--summary-tsv",
+                    str(summary_tsv),
+                    "--summary-md",
+                    str(summary_md),
+                    "--derive-failure",
+                ]
+            )
+
+            self.assertEqual(rc, 0)
+            payload = json.loads(summary_json.read_text(encoding="utf-8"))
+            self.assertEqual(payload["workflow_result"], "FAIL")
+            self.assertEqual(payload["stage"], "process")
+            self.assertEqual(payload["failure_code"], "NO_USABLE_KIN")
+            self.assertEqual(payload["next_action"], "CLASSIFY_NO_KIN")
+            self.assertEqual(payload["failure"]["code"], "NO_USABLE_KIN")
+            self.assertIn("workflow_result\tFAIL\n", summary_tsv.read_text(encoding="utf-8"))
+            self.assertIn("failure_stage\tprocess\n", summary_tsv.read_text(encoding="utf-8"))
+            self.assertIn("failure_code\tNO_USABLE_KIN\n", summary_tsv.read_text(encoding="utf-8"))
+            self.assertIn("next_action\tCLASSIFY_NO_KIN\n", summary_tsv.read_text(encoding="utf-8"))
+            self.assertIn("- Workflow result: `FAIL`", summary_md.read_text(encoding="utf-8"))
+            self.assertIn("- Failure code: `NO_USABLE_KIN`", summary_md.read_text(encoding="utf-8"))
+
 
 if __name__ == "__main__":
     unittest.main()

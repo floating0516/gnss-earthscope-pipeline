@@ -99,6 +99,81 @@ class CliWorkflowCommandTest(unittest.TestCase):
         self.assertIn("--no-cleanup-obs", command)
 
 
+class CliPreflightCommandTest(unittest.TestCase):
+    def test_preflight_earthscope_writes_json_report_to_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            json_out = root / "earthscope-preflight.json"
+            results = [preflight.CheckResult("OK", "test", "passed")]
+            with patch.object(cli.preflight, "run_preflight", return_value=(results, 0)) as run_preflight:
+                with patch.object(cli.preflight, "write_json") as write_json:
+                    with patch.object(cli.preflight, "write_tsv") as write_tsv:
+                        rc = cli.main(
+                            [
+                                "preflight-earthscope",
+                                "--db",
+                                str(root / "availability.sqlite"),
+                                "--verified-files-db",
+                                str(root / "verified.sqlite"),
+                                "--timeout",
+                                "5",
+                                "--format",
+                                "json",
+                                "--json-out",
+                                str(json_out),
+                                "--no-connectivity",
+                                "--no-database",
+                            ]
+                        )
+
+        self.assertEqual(rc, 0)
+        run_preflight.assert_called_once_with(
+            db=str(root / "availability.sqlite"),
+            verified_files_db=str(root / "verified.sqlite"),
+            timeout=5.0,
+            include_connectivity=False,
+            include_database=False,
+        )
+        write_json.assert_called_once()
+        self.assertEqual(write_json.call_args.args, (results, 0))
+        self.assertEqual(write_json.call_args.kwargs["path"], json_out)
+        write_tsv.assert_not_called()
+
+    def test_preflight_geonet_forwards_arguments_and_writes_json_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            json_out = root / "geonet-preflight.json"
+            results = [preflight.CheckResult("OK", "GeoNet preflight", "passed", fatal=False)]
+            with patch.object(cli.preflight, "run_geonet_preflight", return_value=(results, 0)) as run_geonet_preflight:
+                with patch.object(cli.preflight, "write_json") as write_json:
+                    with patch.object(cli.preflight, "write_tsv") as write_tsv:
+                        rc = cli.main(
+                            [
+                                "preflight-geonet",
+                                "--db",
+                                str(root / "geonet.sqlite"),
+                                "--timeout",
+                                "7",
+                                "--format",
+                                "json",
+                                "--json-out",
+                                str(json_out),
+                                "--no-database",
+                            ]
+                        )
+
+        self.assertEqual(rc, 0)
+        run_geonet_preflight.assert_called_once_with(
+            db=str(root / "geonet.sqlite"),
+            timeout=7.0,
+            include_database=False,
+        )
+        write_json.assert_called_once()
+        self.assertEqual(write_json.call_args.args, (results, 0))
+        self.assertEqual(write_json.call_args.kwargs["path"], json_out)
+        write_tsv.assert_not_called()
+
+
 def create_monitor_earthscope_db(path: Path, event_table: str = "usgs_m6plus_events_usa") -> None:
     conn = sqlite3.connect(path)
     conn.execute(
