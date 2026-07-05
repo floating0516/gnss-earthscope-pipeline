@@ -35,6 +35,7 @@ external/
 # Claude/local agent session, index, and config files
 .claude/
 .codegraph/
+.planning/
 .mcp.json
 CLAUDE.md
 
@@ -104,6 +105,11 @@ incoming_plotting_origina/
 # Curated README figures are small, intentional repository assets.
 !docs/images/
 !docs/images/*.png
+
+# Local PGD report workspaces. Commit curated benchmark snapshots explicitly.
+reports/pgd_magnitude/latest/
+reports/pgd_magnitude/release/
+reports/pgd_magnitude/sensitivity/
 
 # Logs and temporary files
 *.log
