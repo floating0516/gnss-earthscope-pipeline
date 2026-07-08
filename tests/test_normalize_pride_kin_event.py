@@ -482,7 +482,6 @@ class NormalizePrideKinEventTest(unittest.TestCase):
                 waveform_rows = list(csv.DictReader(handle))
             self.assertEqual(waveform_rows[0]["Time_UTC"], "2020-01-01T00:00:00Z")
             self.assertEqual(waveform_rows[0]["Time_Offset_s"], "-0.500000")
-
     def test_write_outputs_failure_does_not_leave_partial_event_dir(self):
         with tempfile.TemporaryDirectory() as tmp:
             args, summary, quality, expected_dir = self.make_write_fixture(Path(tmp), overwrite=True)

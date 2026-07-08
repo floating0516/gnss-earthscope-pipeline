@@ -385,7 +385,6 @@ def workflow_started_at(summary: dict, fallback: str) -> str:
             return value
     return fallback
 
-
 def provenance_payload(
     *,
     event_id: str,
