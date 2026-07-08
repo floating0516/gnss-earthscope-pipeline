@@ -551,6 +551,145 @@ class NormalizePrideKinEventTest(unittest.TestCase):
         self.assertIn("event.json", provenance["outputs"])
         self.assertEqual(validation["status"], "OK")
 
+    def test_write_outputs_adds_station_siting_fields_from_database(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            db_path = tmp_path / "events.sqlite"
+            normalized_root = tmp_path / "normalized"
+            workflow_root = tmp_path / "workflow"
+            reports_dir = workflow_root / "reports"
+            manifests_dir = workflow_root / "manifests"
+            workflow_summary = reports_dir / "workflow-summary.json"
+            quality_json = reports_dir / "kin-quality.json"
+            kin_file = tmp_path / "kin_2020001_good"
+
+            conn = sqlite3.connect(db_path)
+            conn.execute(
+                """
+                CREATE TABLE usgs_m6plus_events_earthscope_nonconus (
+                    event_id TEXT PRIMARY KEY,
+                    title TEXT,
+                    time_utc TEXT,
+                    event_date TEXT,
+                    magnitude REAL,
+                    longitude REAL,
+                    latitude REAL,
+                    depth_km REAL,
+                    place TEXT,
+                    usgs_url TEXT
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE event_earthscope_station_verified_files (
+                    event_id TEXT,
+                    station TEXT,
+                    station_latitude REAL,
+                    station_longitude REAL,
+                    distance_km REAL
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE event_earthscope_station_candidates (
+                    event_id TEXT,
+                    station TEXT,
+                    station_latitude REAL,
+                    station_longitude REAL,
+                    distance_km REAL
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE station_siting_metadata (
+                    provider TEXT NOT NULL,
+                    station TEXT NOT NULL,
+                    station9 TEXT NOT NULL DEFAULT '',
+                    station_name TEXT NOT NULL DEFAULT '',
+                    latitude REAL,
+                    longitude REAL,
+                    monument_style TEXT NOT NULL DEFAULT '',
+                    station_siting_type TEXT NOT NULL,
+                    station_siting_type_zh TEXT NOT NULL,
+                    siting_category TEXT NOT NULL,
+                    rooftop_status TEXT NOT NULL,
+                    bedrock_bolted_mast_status TEXT NOT NULL,
+                    siting_source TEXT NOT NULL,
+                    siting_source_url TEXT NOT NULL DEFAULT '',
+                    raw_metadata_json TEXT NOT NULL DEFAULT '',
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY (provider, station)
+                )
+                """
+            )
+            conn.execute(
+                """
+                INSERT INTO usgs_m6plus_events_earthscope_nonconus
+                VALUES ('test-event', 'Test event', '2020-01-01T00:00:00Z', '2020-01-01', 6.1, -100.0, 20.0, 10.0, 'Test place', '')
+                """
+            )
+            conn.execute(
+                """
+                INSERT INTO event_earthscope_station_candidates
+                VALUES ('test-event', 'GOOD', 20.1, -100.1, 15.0)
+                """
+            )
+            conn.execute(
+                """
+                INSERT INTO station_siting_metadata (
+                    provider, station, monument_style, station_siting_type, station_siting_type_zh,
+                    siting_category, rooftop_status, bedrock_bolted_mast_status, siting_source, updated_at
+                ) VALUES (
+                    'EarthScope', 'GOOD', 'BUILDING ROOF', 'roof', '楼顶',
+                    'roof/building', 'yes', 'not classified as bedrock-bolted in DAI',
+                    'EarthScope DAI', '2026-07-09T00:00:00Z'
+                )
+                """
+            )
+            conn.commit()
+            conn.close()
+
+            kin_file.write_text("END OF HEADER\n58849 0 1000 2000 3000\n", encoding="utf-8")
+            manifests_dir.mkdir(parents=True)
+            reports_dir.mkdir(parents=True)
+            (manifests_dir / "kin-files.txt").write_text(f"{kin_file}\n", encoding="utf-8")
+            workflow_summary.write_text(
+                json.dumps({"event": {"id": "test-event", "time_utc": "2020-01-01T00:00:00Z"}}),
+                encoding="utf-8",
+            )
+            quality_json.write_text(
+                json.dumps({"stations": [{"station": "GOOD", "quality_status": "OK", "quality_flags": ""}], "summary": {}}),
+                encoding="utf-8",
+            )
+            args = type(
+                "Args",
+                (),
+                {
+                    "workflow_summary": workflow_summary,
+                    "quality_json": quality_json,
+                    "db": db_path,
+                    "normalized_root": normalized_root,
+                    "include_warn": True,
+                },
+            )()
+
+            result = normalize.write_outputs(
+                args,
+                normalize.load_json(workflow_summary),
+                normalize.load_json(quality_json),
+            )
+
+            with (Path(result["normalized_event_dir"]) / "stations.csv").open(newline="", encoding="utf-8") as handle:
+                rows = list(csv.DictReader(handle))
+
+            self.assertEqual(rows[0]["Monument_Style"], "BUILDING ROOF")
+            self.assertEqual(rows[0]["Station_Siting_Type"], "roof")
+            self.assertEqual(rows[0]["Station_Siting_Type_Zh"], "楼顶")
+            self.assertEqual(rows[0]["Siting_Source"], "EarthScope DAI")
+
 
 if __name__ == "__main__":
     unittest.main()

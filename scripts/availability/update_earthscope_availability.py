@@ -15,6 +15,12 @@ from urllib.request import Request, urlopen
 
 
 ROOT = Path(__file__).resolve().parents[2]
+SRC_DIR = ROOT / "src"
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
+
+from gnss_eq.station_siting import ensure_station_siting_table
+
 DEFAULT_DB = ROOT / "data" / "earthscope_availability" / "earthscope_1hz.sqlite"
 SOURCE = "gage_file_server"
 BASE_URL = "https://gage-data.earthscope.org/archive/gnss/highrate/1-Hz/rinex"
@@ -128,6 +134,7 @@ def init_db(conn: sqlite3.Connection) -> None:
     )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_station_day_date ON station_day_availability(date)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_station_day_station ON station_day_availability(station)")
+    ensure_station_siting_table(conn)
     conn.commit()
 
 

@@ -17,6 +17,12 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
+SRC_DIR = ROOT / "src"
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
+
+from gnss_eq.station_siting import ensure_station_siting_table, upsert_station_siting
+
 DEFAULT_DB = ROOT / "data" / "geonet_availability" / "geonet_1hz.sqlite"
 DEFAULT_STATION_CSV = ROOT / "data" / "geonet_inventory" / "geonet_gnss_stations_all.csv"
 DEFAULT_BATCH_CSV = ROOT / "data" / "geonet_batches" / "geonet_m6plus_nz_candidates_300km.csv"
@@ -356,6 +362,7 @@ def init_db(conn: sqlite3.Connection) -> None:
         )
         """
     )
+    ensure_station_siting_table(conn)
 
 
 def date_from_year_doy(year: int, doy: int) -> str:
@@ -409,6 +416,7 @@ def write_db(
         conn.execute("DELETE FROM geonet_m6plus_events_nz")
         conn.execute("DELETE FROM geonet_gnss_stations")
         conn.execute("DELETE FROM station_day_availability")
+        conn.execute("DELETE FROM station_siting_metadata WHERE provider = 'GeoNet'")
         conn.executemany(
             """
             INSERT OR REPLACE INTO geonet_m6plus_events_nz (
@@ -475,6 +483,23 @@ def write_db(
                 if str(station.get("station") or "").strip()
             ],
         )
+        for station in stations:
+            station_code = str(station.get("station") or "").strip().upper()
+            if not station_code:
+                continue
+            upsert_station_siting(
+                conn,
+                provider="GeoNet",
+                station=station_code,
+                station9=str(station.get("station9") or ""),
+                station_name=str(station.get("name") or ""),
+                latitude=float(station["latitude"]),
+                longitude=float(station["longitude"]),
+                monument_style="UNKNOWN",
+                siting_source="GeoNet station inventory",
+                raw_metadata=station,
+                updated_at=updated_at,
+            )
 
         candidate_rows = []
         for event in events:

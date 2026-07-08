@@ -20,8 +20,12 @@ from pathlib import Path
 QUALITY_DIR = Path(__file__).resolve().parents[1] / "quality"
 if str(QUALITY_DIR) not in sys.path:
     sys.path.insert(0, str(QUALITY_DIR))
+SRC_DIR = Path(__file__).resolve().parents[2] / "src"
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
 
 from compute_kin_quality import kin_to_enu, parse_utc, station_from_path
+from gnss_eq.station_siting import SITING_EXPORT_FIELDS, read_station_siting_exports
 
 ROOT = Path(__file__).resolve().parents[2]
 EVENT_SCHEMA_VERSION = "normalized-event/v1"
@@ -506,6 +510,7 @@ def write_outputs(args: argparse.Namespace, summary: dict, quality: dict) -> dic
     try:
         event = read_event(conn, event_id, event_time_text)
         metadata = read_station_metadata(conn, event_id)
+        siting_by_station = read_station_siting_exports(conn, metadata.keys(), provider="EarthScope")
     finally:
         conn.close()
     event_time = parse_utc(str(event.get("time_utc") or event_time_text))
@@ -579,6 +584,7 @@ def write_outputs(args: argparse.Namespace, summary: dict, quality: dict) -> dic
                         "Quality_Flags": quality_by_station[station].get("quality_flags", ""),
                         "Distance_Km": "" if math.isnan(station_meta["distance_km"]) else f"{station_meta['distance_km']:.3f}",
                         "Azimuth_Deg": "" if azimuth is None else f"{azimuth:.3f}",
+                        **siting_by_station.get(station, {}),
                     }
                 )
 
@@ -595,6 +601,7 @@ def write_outputs(args: argparse.Namespace, summary: dict, quality: dict) -> dic
             "Quality_Flags",
             "Distance_Km",
             "Azimuth_Deg",
+            *SITING_EXPORT_FIELDS,
         ]
         with (stage_dir / "stations.csv").open("w", newline="") as handle:
             writer = csv.DictWriter(handle, fieldnames=station_fieldnames, lineterminator="\n")
