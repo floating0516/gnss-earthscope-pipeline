@@ -115,7 +115,110 @@ def _plot_longitudes(ev_lon: float, stations: pd.DataFrame, region: list[float])
     return ev_lon, stations["Longitude"].values
 
 
-def plot_station_map(event_dir: Path, outdir: Path, dpi: int = 150, out_stem: str = None):
+def label_boxes_overlap(first: tuple[float, float, float, float], second: tuple[float, float, float, float]) -> bool:
+    return not (first[1] <= second[0] or second[1] <= first[0] or first[3] <= second[2] or second[3] <= first[2])
+
+
+def _clamp(value: float, low: float, high: float) -> float:
+    return max(low, min(high, value))
+
+
+def _angle_distance(first: float, second: float) -> float:
+    return abs((first - second + math.pi) % (2.0 * math.pi) - math.pi)
+
+
+def station_label_placements(
+    ev_lon: float,
+    ev_lat: float,
+    station_lons: list[float] | np.ndarray,
+    station_lats: list[float] | np.ndarray,
+    station_names: list[str] | np.ndarray,
+    region: list[float],
+    avoid_boxes: list[tuple[float, float, float, float]] | None = None,
+) -> list[dict[str, object]]:
+    west, east, south, north = region
+    lon_span = max(east - west, 1e-6)
+    lat_span = max(north - south, 1e-6)
+    center_lat = (south + north) / 2.0
+    lon_scale = max(math.cos(math.radians(center_lat)), 0.2)
+    placed_boxes: list[tuple[float, float, float, float]] = []
+    placements: list[dict[str, object]] = []
+    fixed_boxes = avoid_boxes or []
+
+    for index, (lon, lat, name) in enumerate(zip(station_lons, station_lats, station_names)):
+        text = str(name).upper()
+        point_x = (float(lon) - west) / lon_span
+        point_y = (float(lat) - south) / lat_span
+        dx = (float(lon) - ev_lon) * lon_scale / lon_span
+        dy = (float(lat) - ev_lat) / lat_span
+        norm = math.hypot(dx, dy)
+        if norm < 1e-9:
+            base_angle = index * 2.399963229728653
+        else:
+            base_angle = math.atan2(dy, dx)
+        raw_angles = [
+            base_angle,
+            base_angle + 0.55,
+            base_angle - 0.55,
+            base_angle + 1.10,
+            base_angle - 1.10,
+            base_angle + math.pi / 2.0,
+            base_angle - math.pi / 2.0,
+            0.0,
+            math.pi / 2.0,
+            math.pi,
+            -math.pi / 2.0,
+            math.pi / 4.0,
+            3.0 * math.pi / 4.0,
+            -3.0 * math.pi / 4.0,
+            -math.pi / 4.0,
+        ]
+        candidate_angles: list[float] = []
+        seen_angles = set()
+        for angle in raw_angles:
+            key = round((angle + 2.0 * math.pi) % (2.0 * math.pi), 3)
+            if key not in seen_angles:
+                seen_angles.add(key)
+                candidate_angles.append(angle)
+
+        label_width = min(0.16, max(0.065, 0.018 + len(text) * 0.012))
+        label_height = 0.034
+        best: tuple[float, float, tuple[float, float, float, float], float] | None = None
+        for radius in (0.038, 0.058, 0.082, 0.11, 0.14, 0.18, 0.23):
+            for angle in candidate_angles:
+                label_x = _clamp(point_x + math.cos(angle) * radius, 0.015 + label_width / 2.0, 0.985 - label_width / 2.0)
+                label_y = _clamp(point_y + math.sin(angle) * radius, 0.02 + label_height / 2.0, 0.98 - label_height / 2.0)
+                box = (
+                    label_x - label_width / 2.0,
+                    label_x + label_width / 2.0,
+                    label_y - label_height / 2.0,
+                    label_y + label_height / 2.0,
+                )
+                overlaps = sum(1 for placed in placed_boxes if label_boxes_overlap(box, placed))
+                fixed_overlaps = sum(1 for fixed in fixed_boxes if label_boxes_overlap(box, fixed))
+                edge_penalty = 0.0
+                if label_x <= 0.02 + label_width / 2.0 or label_x >= 0.98 - label_width / 2.0:
+                    edge_penalty += 0.5
+                if label_y <= 0.025 + label_height / 2.0 or label_y >= 0.975 - label_height / 2.0:
+                    edge_penalty += 0.5
+                score = fixed_overlaps * 1000.0 + overlaps * 100.0 + radius * 4.0 + _angle_distance(angle, base_angle) * 0.04 + edge_penalty
+                if best is None or score < best[3]:
+                    best = (label_x, label_y, box, score)
+        assert best is not None
+        label_x, label_y, box, _score = best
+        placed_boxes.append(box)
+        placements.append(
+            {
+                "text": text,
+                "x": west + label_x * lon_span,
+                "y": south + label_y * lat_span,
+                "box": box,
+            }
+        )
+    return placements
+
+
+def plot_station_map(event_dir: Path, outdir: Path, dpi: int = 150, out_stem: str = None, label_stations: bool = False):
     """Generate station map with topography, beachball, and inset globe."""
     event = load_event(event_dir)
     stations = load_stations(event_dir)
@@ -140,6 +243,8 @@ def plot_station_map(event_dir: Path, outdir: Path, dpi: int = 150, out_stem: st
         short_name = event_label.split(" - ")[-1] if " - " in event_label else event_label.split("M ")[1].split(",")[0] if "," in event_label else event_label
     else:
         short_name = event_label
+    if "," in short_name:
+        short_name = short_name.rsplit(",", 1)[0].strip()
     title = f"{date_str} M@-w@-{mag} {short_name}"
     title = title.replace('"', '')
 
@@ -174,6 +279,18 @@ def plot_station_map(event_dir: Path, outdir: Path, dpi: int = 150, out_stem: st
         fill="white",
         label=f"GNSS ({n_stations})",
     )
+    if label_stations:
+        labels = station_label_placements(
+            ev_lon=plot_ev_lon,
+            ev_lat=ev_lat,
+            station_lons=station_lons,
+            station_lats=stations["Latitude"].values,
+            station_names=stations["Station"].values,
+            region=region,
+            avoid_boxes=[(0.015, 0.19, 0.90, 0.985), (0.76, 0.985, 0.66, 0.985), (0.78, 0.985, 0.02, 0.10)],
+        )
+        for label in labels:
+            fig.text(x=[label["x"]], y=[label["y"]], text=[label["text"]], font="7p,Helvetica-Bold,black", justify="CM", no_clip=True)
 
     if strike != 0 or dip != 0 or rake != 0:
         focal_mech = dict(

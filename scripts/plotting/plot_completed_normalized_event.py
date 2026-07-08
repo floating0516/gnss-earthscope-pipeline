@@ -20,7 +20,7 @@ from gnss_eq.data_io import find_event_dirs
 from gnss_eq.plotting.record_section import plot_record_section
 from gnss_eq.plotting.station_map import plot_station_map
 
-BASE_DIR = _here.parent
+BASE_DIR = _here.parents[1]
 DEFAULT_NORMALIZED_ROOT = BASE_DIR / "exports" / "normalized-ok-stations-us-nz"
 DEFAULT_OUTDIR = BASE_DIR / "figure"
 
@@ -87,6 +87,7 @@ def main() -> None:
     parser.add_argument("--dpi", type=int, default=150)
     parser.add_argument("--skip-map", action="store_true")
     parser.add_argument("--skip-waveform", action="store_true")
+    parser.add_argument("--label-stations", action="store_true", help="Draw station names on the station map")
     args = parser.parse_args()
 
     event_id = workflow_event_id(args.workflow_summary)
@@ -116,7 +117,7 @@ def main() -> None:
     if not args.skip_waveform:
         print(plot_record_section(event_dir, args.outdir, dpi=args.dpi, out_stem=stem))
     if not args.skip_map:
-        print(plot_station_map(event_dir, args.outdir, dpi=args.dpi, out_stem=stem))
+        print(plot_station_map(event_dir, args.outdir, dpi=args.dpi, out_stem=stem, label_stations=args.label_stations))
 
 
 if __name__ == "__main__":
